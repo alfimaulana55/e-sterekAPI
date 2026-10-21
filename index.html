@@ -1,0 +1,2096 @@
+<!-- checkpoint terakhir versi 7 pukul 17.25sebelum ganti database
+      versi 11 masih error di bagian mutasi dan hapus belom baca id
+      versi 12 sudah fix edit,mutasi,hapus sesuai id (checkpoint)
+      versi 13 menambah offline mode mhtml
+      versi 14 minor
+      database:
+      untuk spreadsheet check point nya sebelum GANTI DATABASE 19 September, 21.09       
+      -->
+
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=3.0, user-scalable=yes">
+  <title>E-Sterek Gladakan</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    body { background-color: #f1f5f9; user-select: none; -webkit-tap-highlight-color: transparent; }
+    .custom-scrollbar::-webkit-scrollbar { display: none; }
+    .custom-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    .drop-active { background-color: #e0e7ff !important; border-color: #4338ca !important; }
+    
+    .modal-scrollable {
+      overscroll-behavior: contain !important;
+      -webkit-overflow-scrolling: touch;
+    }
+    body.body-scroll-locked {
+      overflow: hidden !important;
+    }
+    .highlight-section {
+      animation: highlightPulse 2.5s ease-out;
+    }
+    @keyframes highlightPulse {
+      0% { background-color: rgba(99, 102, 241, 0.4); transform: scale(1.02); }
+      50% { background-color: rgba(99, 102, 241, 0.2); }
+      100% { background-color: transparent; transform: scale(1); }
+    }
+  </style>
+</head>
+<body class="flex justify-center bg-gray-200 min-h-screen">
+
+  <div id="app-wrapper" class="w-full max-w-md bg-slate-50 min-h-screen flex flex-col shadow-2xl relative pb-20">
+
+    <!-- HEADER TOP BAR -->
+    <header class="bg-indigo-900 text-white p-3.5 sticky top-0 z-30 flex items-center justify-between shadow-md">
+      <div class="flex items-center gap-2">
+        <span class="font-bold text-base tracking-wide">E-Sterek</span>
+        <button id="btn-toggle-online" onclick="toggleOnlineOffline()" class="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold bg-green-500/20 text-green-300 border border-green-500/40 hover:bg-green-500/30 transition">
+          <span id="toggle-indicator-dot" class="w-2 h-2 rounded-full bg-green-400 animate-pulse"></span>
+          <span id="toggle-indicator-text">ONLINE</span>
+        </button>
+      </div>
+
+      <div class="flex items-center gap-2.5 text-base">
+        <button onclick="openDownloadChoiceModal()" title="Pilihan Unduh Data" class="hover:text-indigo-200 transition bg-indigo-800/80 p-1.5 rounded-lg flex items-center justify-center">
+  <i class="fa-solid fa-cloud-arrow-down text-sm"></i>
+</button>
+
+        <button onclick="handleManualSync()" title="Refresh Data" class="hover:text-indigo-200 transition p-1">
+          <i class="fa-solid fa-arrows-rotate text-sm"></i>
+        </button>
+        <button onclick="openSearchModal()" title="Cari Nama/Blok" class="hover:text-indigo-200 transition p-1">
+          <i class="fa-solid fa-magnifying-glass text-sm"></i>
+        </button>
+        <button id="btn-login-header" onclick="openLoginModal()" title="Login Petugas" class="hover:text-indigo-200 transition relative p-1">
+          <i class="fa-solid fa-circle-user text-base"></i>
+          <span id="login-indicator" class="hidden absolute top-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-indigo-900 rounded-full"></span>
+        </button>
+      </div>
+    </header>
+
+    <!-- STATUS BANNER OFFLINE -->
+    <div id="banner-offline" class="hidden bg-amber-500 text-white text-[11px] font-bold py-1 px-3 text-center shadow-inner flex items-center justify-center gap-2">
+      <i class="fa-solid fa-triangle-exclamation"></i>
+      <span>Mode Offline Aktif (Membaca Data IndexedDB Lokal)</span>
+    </div>
+
+    <!-- MAIN CONTENT -->
+    <main id="main-scroll-container" class="flex-1 p-3 overflow-y-auto">
+
+      <!-- VIEW 1: HOME -->
+      <section id="view-home" class="space-y-4">
+        <div id="filter-pills" class="flex gap-2 overflow-x-auto custom-scrollbar pb-1 text-xs font-semibold"></div>
+
+        <div id="wbp-list-container" class="space-y-6">
+          <div class="text-center py-10 text-gray-400">
+            <i class="fa-solid fa-spinner fa-spin text-3xl mb-2 text-indigo-900"></i>
+            <p class="text-xs font-semibold">Memuat Data...</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW 2: TAMBAH WBP -->
+      <section id="view-add" class="hidden space-y-4 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+        <h2 id="form-title" class="text-lg font-bold text-gray-800 border-b pb-2">Tambah WBP Baru</h2>
+        
+        <form id="wbp-form" onsubmit="handleFormSubmit(event)" class="space-y-3.5">
+          <input type="hidden" id="input-id" value="">
+
+          <div>
+            <label class="block text-xs font-semibold text-gray-600 uppercase mb-1">Unggah Foto (Opsional / Drag / Ctrl+V Paste)</label>
+            <div id="drop-zone" class="border-2 border-dashed border-indigo-200 rounded-lg p-4 text-center bg-indigo-50/50 cursor-pointer hover:bg-indigo-50 transition" onclick="document.getElementById('foto-input').click()">
+              <i class="fa-solid fa-cloud-arrow-up text-3xl text-indigo-600 mb-1"></i>
+              <p class="text-xs text-indigo-900 font-semibold">Klik, Drag foto, atau tekan Ctrl+V (Snipping Tool)</p>
+              <p class="text-[10px] text-gray-500 mt-1">Otomatis kompres maks ~50KB (.jpg)</p>
+              <input type="file" id="foto-input" accept="image/*" class="hidden" onchange="handleFileSelect(event)">
+            </div>
+            <div id="photo-preview-container" class="hidden mt-2 flex justify-center">
+              <img id="photo-preview" class="w-24 h-32 object-cover rounded shadow border">
+            </div>
+            
+            <div class="text-center my-2 text-xs text-gray-400 font-bold uppercase">ATAU</div>
+            <input type="url" id="foto-url-input" placeholder="Atau paste URL foto" class="w-full text-xs p-2.5 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-gray-600 mb-0.5">NOMOR REGISTRASI</label>
+            <input type="text" id="input-no-reg" class="w-full text-xs p-2.5 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none uppercase">
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-gray-600 mb-0.5">NAMA LENGKAP NARAPIDANA</label>
+            <input type="text" id="input-nama" class="w-full text-xs p-2.5 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none uppercase">
+          </div>
+
+          <div class="relative">
+            <label class="block text-xs font-bold text-indigo-900 mb-0.5">BLOK / KAMAR <span class="text-red-500">*WAJIB</span></label>
+            <input type="text" id="input-kamar" placeholder="Contoh: A1, B5, M1, I2, KLINIK" required oninput="filterRoomSuggestions(this.value, 'add')" class="w-full text-xs p-2.5 border-2 border-indigo-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none uppercase font-bold">
+            <div id="room-suggestions-add" class="hidden absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-b-lg max-h-32 overflow-y-auto z-20 shadow-lg text-xs"></div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block text-[11px] font-semibold text-gray-600 mb-0.5">TGL MASUK UPT</label>
+              <input type="text" id="input-tgl-masuk-upt" placeholder="dd/mm/yyyy" class="w-full text-xs p-2.5 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none uppercase">
+            </div>
+            <div>
+              <label class="block text-[11px] font-semibold text-gray-600 mb-0.5">TGL PENEMPATAN</label>
+              <input type="text" id="input-tgl-penempatan" placeholder="dd/mm/yyyy" class="w-full text-xs p-2.5 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none uppercase">
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-gray-600 mb-0.5">PIDANA</label>
+            <input type="text" id="input-pidana" placeholder="Pasal / Tindak Pidana" class="w-full text-xs p-2.5 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none uppercase">
+          </div>
+
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block text-[11px] font-semibold text-gray-600 mb-0.5">TGL EKSPIRASI</label>
+              <input type="text" id="input-ekspirasi" placeholder="dd/mm/yyyy atau -" class="w-full text-xs p-2.5 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none uppercase">
+            </div>
+            <div>
+              <label class="block text-[11px] font-semibold text-gray-600 mb-0.5">PUTUSAN</label>
+              <input type="text" id="input-putusan" placeholder="Contoh: 5 Tahun" class="w-full text-xs p-2.5 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none uppercase">
+            </div>
+          </div>
+
+          <button type="submit" id="btn-submit-wbp" class="w-full py-3 bg-indigo-900 text-white text-xs font-bold rounded-lg shadow-md hover:bg-indigo-800 transition">
+            SIMPAN DATA WBP
+          </button>
+        </form>
+      </section>
+
+      <!-- VIEW 3: RIWAYAT -->
+      <section id="view-riwayat" class="hidden space-y-4">
+        <div class="grid grid-cols-2 bg-gray-200 p-1 rounded-xl text-center text-xs font-bold">
+          <button id="tab-btn-pindah" onclick="switchRiwayatTab('pindah')" class="py-2 rounded-lg bg-white shadow text-indigo-900 transition">PINDAH BLOK</button>
+          <button id="tab-btn-keluar" onclick="switchRiwayatTab('keluar')" class="py-2 rounded-lg text-gray-500 hover:text-indigo-900 transition">WBP KELUAR</button>
+        </div>
+
+        <div class="flex items-center gap-2 bg-white p-2 rounded-xl shadow-sm border">
+          <i class="fa-regular fa-calendar-days text-indigo-900 pl-2"></i>
+          <input type="date" id="riwayat-date-filter" onchange="renderRiwayatList()" class="text-xs w-full bg-transparent outline-none">
+        </div>
+
+        <div id="riwayat-list-container" class="space-y-2"></div>
+
+        <button onclick="loadMoreRiwayat()" class="w-full py-2 bg-indigo-50 border border-indigo-200 text-indigo-900 text-xs font-bold rounded-xl shadow-sm hover:bg-indigo-100 transition">
+          MUAT LEBIH BANYAK
+        </button>
+      </section>
+
+    </main>
+
+    <!-- POIN 3: TOMBOL PETA KAMAR -->
+    <button id="fab-map" onclick="handleOpenMapButton()" class="fixed bottom-20 right-[calc(50%-180px)] sm:right-[calc(50%-200px)] z-20 w-12 h-12 bg-indigo-900 text-white rounded-full shadow-lg flex items-center justify-center hover:scale-105 transition" title="Buka Peta Kamar">
+      <i class="fa-solid fa-map-location-dot text-lg"></i>
+    </button>
+
+    <!-- BOTTOM NAVIGATION BAR -->
+    <nav class="fixed bottom-0 w-full max-w-md bg-white border-t border-gray-200 flex justify-around py-2 z-30 shadow-lg text-center">
+      <button onclick="handleNavHomeClick()" id="nav-home" class="flex flex-col items-center text-indigo-900 font-bold text-[10px]">
+        <i class="fa-solid fa-house text-lg mb-0.5"></i>
+        <span>Home</span>
+      </button>
+      <button onclick="switchView('add')" id="nav-add" class="flex flex-col items-center text-gray-400 font-medium text-[10px]">
+        <i class="fa-solid fa-user-plus text-lg mb-0.5"></i>
+        <span>Tambah WBP</span>
+      </button>
+      <button onclick="switchView('riwayat')" id="nav-riwayat" class="flex flex-col items-center text-gray-400 font-medium text-[10px]">
+        <i class="fa-solid fa-clock-rotate-left text-lg mb-0.5"></i>
+        <span>Riwayat</span>
+      </button>
+    </nav>
+
+    <!-- ==================== MODALS & POPUPS ==================== -->
+
+    <!-- MODAL LOADING OVERLAY -->
+    <div id="modal-loading" class="app-modal hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+      <div class="bg-white rounded-2xl p-6 shadow-2xl flex flex-col items-center gap-3">
+        <i class="fa-solid fa-spinner fa-spin text-4xl text-indigo-900"></i>
+        <p id="loading-text" class="text-xs font-bold text-gray-800">Sedang memproses...</p>
+      </div>
+    </div>
+
+    <!-- PETA KAMAR DINAMIS -->
+    <div id="modal-map" class="app-modal hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div class="bg-white rounded-2xl w-full max-w-sm max-h-[85vh] flex flex-col p-4 shadow-xl modal-scrollable">
+        <div class="flex justify-between items-center border-b pb-2 mb-3 flex-shrink-0">
+          <div>
+            <h3 class="font-bold text-xs text-gray-800">Peta Kamar Gladakan</h3>
+            <p class="text-[9px] text-gray-400">Pilih kamar untuk langsung menuju data WBP</p>
+          </div>
+          <button onclick="closeModal('modal-map')" class="text-gray-400 hover:text-black text-sm p-1"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div id="map-grid-container" class="flex-1 overflow-y-auto space-y-4 pr-1 modal-scrollable"></div>
+      </div>
+    </div>
+
+    <!-- DETAIL WBP PROFIL -->
+    <div id="modal-detail" class="app-modal hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div class="bg-white rounded-2xl w-full max-w-xs max-h-[85vh] overflow-y-auto p-5 space-y-4 shadow-xl relative modal-scrollable">
+        <button onclick="closeModal('modal-detail')" class="absolute top-4 right-4 text-gray-400 hover:text-black"><i class="fa-solid fa-xmark text-lg"></i></button>
+        
+        <div class="flex justify-between items-center pr-6">
+          <p class="text-[10px] font-bold text-gray-400 tracking-wider">PROFIL WBP</p>
+          <span id="detail-badge-id" class="text-[9px] bg-indigo-100 text-indigo-900 font-bold px-2 py-0.5 rounded-full">ID: -</span>
+        </div>
+        
+        <div class="flex flex-col items-center text-center space-y-2">
+          <img id="detail-foto" class="w-24 h-32 object-cover rounded-lg border shadow-sm bg-gray-100" src="" alt="Foto">
+          <div>
+            <h3 id="detail-nama" class="font-bold text-sm text-gray-900 uppercase"></h3>
+            <p id="detail-no-reg" class="text-[10px] text-gray-500 font-semibold"></p>
+          </div>
+        </div>
+
+        <div class="space-y-2 border-t pt-3 text-xs">
+          <div>
+            <span class="text-[10px] text-gray-400 font-bold block uppercase">PIDANA</span>
+            <span id="detail-pidana" class="font-bold text-gray-800"></span>
+          </div>
+          <div>
+            <span class="text-[10px] text-gray-400 font-bold block uppercase">PUTUSAN</span>
+            <span id="detail-putusan" class="font-bold text-gray-800"></span>
+          </div>
+          <div>
+            <span class="text-[10px] text-gray-400 font-bold block uppercase">TGL EKSPIRASI</span>
+            <span id="detail-ekspirasi" class="font-bold text-gray-800"></span>
+          </div>
+          <div>
+            <span class="text-[10px] text-gray-400 font-bold block uppercase">TGL MASUK UPT</span>
+            <span id="detail-tgl-masuk-upt" class="font-bold text-gray-800"></span>
+          </div>
+          <div>
+            <span class="text-[10px] text-gray-400 font-bold block uppercase">TGL PENEMPATAN</span>
+            <span id="detail-tgl-masuk" class="font-bold text-gray-800"></span>
+            <span id="detail-durasi-blok" class="text-[10px] text-indigo-600 font-bold block"></span>
+          </div>
+
+          <div class="pt-2">
+            <span class="text-[10px] text-gray-400 font-bold block uppercase mb-1">RIWAYAT PENEMPATAN / MUTASI</span>
+            <div id="detail-riwayat-mutasi-list" class="space-y-1.5 max-h-32 overflow-y-auto pr-1 custom-scrollbar modal-scrollable"></div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-3 gap-2 border-t pt-3">
+          <button onclick="openEditModalFromDetail()" class="py-2 bg-gray-200 text-gray-800 text-[10px] font-bold rounded-lg hover:bg-gray-300">EDIT</button>
+          <button onclick="openMutasiModal()" class="py-2 bg-indigo-900 text-white text-[10px] font-bold rounded-lg hover:bg-indigo-800">MUTASI</button>
+          <button onclick="openHapusModal()" class="py-2 bg-red-600 text-white text-[10px] font-bold rounded-lg hover:bg-red-700">HAPUS</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL EDIT DATA WBP -->
+    <div id="modal-edit" class="app-modal hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div class="bg-white rounded-2xl w-full max-w-sm max-h-[85vh] overflow-y-auto p-4 shadow-xl relative modal-scrollable">
+        <div class="flex justify-between items-center border-b pb-2 mb-3">
+          <h3 id="edit-modal-title" class="font-bold text-xs text-gray-800">Edit Data WBP</h3>
+          <button onclick="closeModal('modal-edit')" class="text-gray-400 hover:text-black text-sm p-1"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+
+        <form id="edit-modal-form" onsubmit="handleEditModalSubmit(event)" class="space-y-3">
+          <input type="hidden" id="edit-input-id">
+
+         <div>
+            <label class="block text-[10px] font-semibold text-gray-600 uppercase mb-1">Ganti Foto WBP</label>
+            
+            <!-- LABEL NATIVE (100% PASTI BUKA GALERI/KAMERA DI HP) -->
+            <label for="edit-foto-input" id="edit-drop-zone" class="block border-2 border-dashed border-indigo-300 rounded-lg p-3 text-center bg-indigo-50/70 cursor-pointer hover:bg-indigo-100 active:scale-95 transition">
+              <i class="fa-solid fa-camera text-2xl text-indigo-600 mb-1"></i>
+              <p class="text-xs text-indigo-900 font-bold">Pilih dari Galeri / Kamera HP</p>
+              <p class="text-[10px] text-gray-500">Sentuh kotak ini untuk memilih foto</p>
+              <input type="file" id="edit-foto-input" accept="image/*" class="sr-only" onchange="handleEditFileSelect(event)" onclick="this.value=null;">
+            </label>
+
+            <!-- TOMBOL KHUSUS TEMPEL (PASTE) UNTUK PENGGUNA HP -->
+            <div class="mt-1.5 flex gap-2">
+              <button type="button" onclick="pasteImageFromClipboard('edit')" class="w-full py-1.5 px-2 bg-indigo-50 border border-indigo-200 text-indigo-800 text-[10px] font-bold rounded-lg flex items-center justify-center gap-1.5 active:bg-indigo-200">
+                <i class="fa-solid fa-paste"></i>
+                <span>Tempel (Paste) Foto dari Clipboard HP</span>
+              </button>
+            </div>
+
+            <!-- PREVIEW FOTO & STATUS -->
+            <div id="edit-photo-preview-container" class="mt-2 flex flex-col items-center justify-center">
+              <img id="edit-photo-preview" class="w-20 h-28 object-cover rounded shadow border bg-gray-100" alt="Preview">
+              <span id="edit-photo-status" class="text-[9px] text-green-600 font-bold mt-1 hidden">✓ Foto Baru Siap Diunggah</span>
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-[10px] font-semibold text-gray-600 mb-0.5">NOMOR REGISTRASI</label>
+            <input type="text" id="edit-input-no-reg" class="w-full text-xs p-2 border rounded-lg outline-none uppercase">
+          </div>
+
+          <div>
+            <label class="block text-[10px] font-semibold text-gray-600 mb-0.5">NAMA LENGKAP</label>
+            <input type="text" id="edit-input-nama" class="w-full text-xs p-2 border rounded-lg outline-none uppercase">
+          </div>
+
+          <div class="relative">
+            <label class="block text-[10px] font-bold text-indigo-900 mb-0.5">BLOK / KAMAR <span class="text-red-500">*WAJIB</span></label>
+            <input type="text" id="edit-input-kamar" required oninput="filterRoomSuggestions(this.value, 'edit')" class="w-full text-xs p-2 border-2 border-indigo-300 rounded-lg outline-none uppercase font-bold">
+            <div id="room-suggestions-edit" class="hidden absolute bottom-full left-0 right-0 bg-white border border-gray-200 rounded-t-lg max-h-32 overflow-y-auto z-20 shadow-lg text-xs"></div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block text-[10px] font-semibold text-gray-600 mb-0.5">TGL MASUK UPT</label>
+              <input type="text" id="edit-input-tgl-masuk-upt" class="w-full text-xs p-2 border rounded-lg outline-none uppercase">
+            </div>
+            <div>
+              <label class="block text-[10px] font-semibold text-gray-600 mb-0.5">TGL PENEMPATAN</label>
+              <input type="text" id="edit-input-tgl-penempatan" class="w-full text-xs p-2 border rounded-lg outline-none uppercase">
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-[10px] font-semibold text-gray-600 mb-0.5">PIDANA</label>
+            <input type="text" id="edit-input-pidana" class="w-full text-xs p-2 border rounded-lg outline-none uppercase">
+          </div>
+
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block text-[10px] font-semibold text-gray-600 mb-0.5">TGL EKSPIRASI</label>
+              <input type="text" id="edit-input-ekspirasi" class="w-full text-xs p-2 border rounded-lg outline-none uppercase">
+            </div>
+            <div>
+              <label class="block text-[10px] font-semibold text-gray-600 mb-0.5">PUTUSAN</label>
+              <input type="text" id="edit-input-putusan" class="w-full text-xs p-2 border rounded-lg outline-none uppercase">
+            </div>
+          </div>
+
+          <div class="flex gap-2 pt-2">
+            <button type="button" onclick="closeModal('modal-edit')" class="flex-1 py-2.5 bg-gray-100 text-gray-600 font-bold text-xs rounded-lg">BATAL</button>
+            <button type="submit" id="btn-save-edit-modal" class="flex-1 py-2.5 bg-indigo-900 text-white font-bold text-xs rounded-lg shadow">SIMPAN PERUBAHAN</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- MUTASI -->
+    <div id="modal-mutasi" class="app-modal hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div class="bg-white rounded-2xl w-full max-w-xs p-4 space-y-3 shadow-xl modal-scrollable">
+        <h3 class="font-bold text-xs text-gray-800 border-b pb-2">Pindahkan Kamar (Mutasi)</h3>
+        
+        <div class="relative">
+          <label class="text-[10px] font-bold text-gray-500">PINDAH KE KAMAR <span class="text-red-500">*WAJIB</span></label>
+          <input type="text" id="mutasi-kamar" placeholder="Contoh: A12, M2, KLINIK" oninput="filterRoomSuggestions(this.value, 'mutasi')" class="w-full text-xs p-2 border rounded-lg outline-none uppercase font-bold">
+          <div id="room-suggestions-mutasi" class="hidden absolute bottom-full left-0 right-0 bg-white border border-gray-200 rounded-t-lg max-h-32 overflow-y-auto z-20 shadow-lg text-xs"></div>
+        </div>
+
+        <div>
+          <label class="text-[10px] font-bold text-gray-500">ALASAN / KETERANGAN</label>
+          <input type="text" id="mutasi-alasan" placeholder="Contoh: Naik blok, sakit" class="w-full text-xs p-2 border rounded-lg outline-none uppercase">
+        </div>
+
+        <div class="flex gap-2 pt-2">
+          <button onclick="closeModal('modal-mutasi')" class="flex-1 py-2 bg-gray-100 text-gray-600 font-bold text-xs rounded-lg">BATAL</button>
+          <button id="btn-submit-mutasi" onclick="executeMutasi()" class="flex-1 py-2 bg-indigo-900 text-white font-bold text-xs rounded-lg">SIMPAN</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- HAPUS / PROSES KELUAR -->
+    <div id="modal-hapus" class="app-modal hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div class="bg-white rounded-2xl w-full max-w-xs p-4 space-y-3 shadow-xl modal-scrollable">
+        <h3 class="font-bold text-xs text-gray-800 border-b pb-2">Proses Keluar WBP</h3>
+        
+        <div>
+          <label class="text-[10px] font-bold text-gray-500">ALASAN KELUAR</label>
+          <select id="hapus-status" onchange="toggleLainnyaInput(this.value)" class="w-full text-xs p-2 border rounded-lg outline-none font-semibold">
+            <option value="BEBAS MURNI">Bebas Murni</option>
+            <option value="INTEGRASI">Integrasi</option>
+            <option value="PINDAH LAPAS">Pindah ke Lapas/Rutan Lain</option>
+            <option value="LAINNYA">Lainnya...</option>
+          </select>
+        </div>
+
+        <div id="hapus-lainnya-container" class="hidden">
+          <input type="text" id="hapus-lainnya-text" placeholder="Tuliskan alasan..." class="w-full text-xs p-2 border rounded-lg outline-none uppercase">
+        </div>
+
+        <div class="flex gap-2 pt-2">
+          <button onclick="closeModal('modal-hapus')" class="flex-1 py-2 bg-gray-100 text-gray-600 font-bold text-xs rounded-lg">BATAL</button>
+          <button id="btn-submit-hapus" onclick="executeHapus()" class="flex-1 py-2 bg-red-600 text-white font-bold text-xs rounded-lg">PROSES KELUAR</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL LOGIN ADMIN -->
+    <div id="modal-login" class="app-modal hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div class="bg-white rounded-2xl w-full max-w-xs p-5 space-y-4 shadow-xl text-center modal-scrollable">
+        <div class="w-12 h-12 bg-indigo-100 text-indigo-900 rounded-full flex items-center justify-center mx-auto text-xl">
+          <i class="fa-solid fa-lock"></i>
+        </div>
+        <h3 class="font-bold text-gray-800 text-sm">Login Petugas KPLP</h3>
+        <p class="text-[11px] text-gray-500">Silakan masuk </p>
+        
+        <input type="text" id="login-username" placeholder="USERNAME" class="w-full text-xs p-2.5 border rounded-lg outline-none uppercase bg-gray-50">
+        <input type="password" id="login-password" placeholder="PASSWORD" class="w-full text-xs p-2.5 border rounded-lg outline-none bg-gray-50">
+        
+        <div class="space-y-2 pt-2">
+          <button onclick="handleLoginSubmit()" class="w-full py-2.5 bg-indigo-900 text-white font-bold text-xs rounded-lg shadow">MASUK</button>
+          <button onclick="closeModal('modal-login')" class="w-full py-2 bg-gray-100 text-gray-600 font-bold text-xs rounded-lg">BATAL</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- SEARCH -->
+    <div id="modal-search" class="app-modal hidden fixed inset-0 bg-black/50 z-50 flex items-start justify-center pt-16 p-4">
+      <div class="bg-white rounded-2xl w-full max-w-xs p-4 space-y-3 shadow-xl modal-scrollable">
+        <div class="flex justify-between items-center border-b pb-2">
+          <h3 class="font-bold text-xs text-gray-800">Pencarian Cepat</h3>
+          <button onclick="closeModal('modal-search')" class="text-gray-400 hover:text-black"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <input type="text" id="search-input" oninput="handleSearch(this.value)" placeholder="Cari Nama, No Reg, Pidana, atau Blok..." class="w-full text-xs p-2.5 border rounded-lg outline-none uppercase">
+        <p class="text-[10px] text-gray-400">Pencarian cepat nama, no registrasi, pidana, atau kamar.</p>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- MODAL PILIHAN DOWNLOAD (INDEXEDDB ATAU MHTML) -->
+    <div id="modal-download-choice" class="app-modal hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div class="bg-white rounded-2xl w-full max-w-xs p-5 space-y-4 shadow-xl text-center modal-scrollable">
+        <div class="flex justify-between items-center border-b pb-2">
+          <h3 class="font-bold text-xs text-gray-800">Pilihan Unduhan</h3>
+          <button onclick="closeModal('modal-download-choice')" class="text-gray-400 hover:text-black text-sm p-1"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        
+        <p class="text-[11px] text-gray-500">Pilih skema unduhan yang Anda butuhkan:</p>
+        
+        <div class="space-y-2.5 text-left">
+          <!-- Pilihan 1: MHTML Arsip Mandiri -->
+          <button onclick="executeDownloadMHTML()" class="w-full p-3 bg-emerald-50 border border-emerald-200 rounded-xl hover:bg-emerald-100 transition flex items-center gap-3">
+            <div class="w-9 h-9 rounded-full bg-emerald-700 text-white flex items-center justify-center text-sm flex-shrink-0">
+              <i class="fa-solid fa-file-zipper"></i>
+            </div>
+            <div>
+              <div class="text-xs font-bold text-indigo-900">Unduh file (Rekomendasi)</div>
+              <div class="text-[10px] text-gray-500">Download menjadi 1 file</div>
+            </div>
+          </button>
+
+          <!-- Pilihan 2: IndexedDB -->
+          <button onclick="executeDownloadIndexedDB()" class="w-full p-3 bg-indigo-50 border border-indigo-200 rounded-xl hover:bg-indigo-100 transition flex items-center gap-3">
+            <div class="w-9 h-9 rounded-full bg-indigo-900 text-white flex items-center justify-center text-sm flex-shrink-0">
+              <i class="fa-solid fa-database"></i>
+            </div>
+            <div>
+              <div class="text-xs font-bold text-indigo-900">Simpan ke IndexedDB</div>
+              <div class="text-[10px] text-gray-500">Database offline di web ini</div>
+            </div>
+          </button>
+
+          
+        </div>
+      </div>
+    </div>
+
+  <script>
+    var APP_DATA = { tabel_wbp: [], log_mutasi: [], log_keluar: [], master_kamar: [] };
+    var currentSelectedWBP = null;
+    var currentRiwayatTab = 'pindah';
+    var riwayatDisplayLimit = 10;
+    var compressedPhotoBase64 = "";
+    var editCompressedPhotoBase64 = "";
+    var isLoggedIn = false;
+    var isOfflineMode = false;
+    var isSubmitting = false;
+    var currentActiveView = 'home';
+    var activeBlockFilter = 'ALL';
+
+    var DB_NAME = "E_Sterek_DB";
+    var DB_VERSION = 3;
+    var db = null;
+
+    function naturalSort(a, b) {
+      return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+    }
+
+    var scrollLockY = 0;
+    function lockScroll() {
+      scrollLockY = window.scrollY || document.documentElement.scrollTop;
+      document.body.classList.add('body-scroll-locked');
+      document.body.style.top = '-' + scrollLockY + 'px';
+    }
+
+    // POIN 3: MEMPERBAIKI UNLOCK SCROLL AGAR TIDAK MEMBATALKAN PERPINDAHAN HALAMAN
+    function unlockScroll() {
+      var activeModals = document.querySelectorAll('.app-modal:not(.hidden)');
+      if (activeModals.length === 0) {
+        document.body.classList.remove('body-scroll-locked');
+        document.body.style.top = '';
+      }
+    }
+
+    function openModal(modalId) {
+      document.getElementById(modalId).classList.remove('hidden');
+      lockScroll();
+    }
+
+    function closeModal(modalId) {
+      document.getElementById(modalId).classList.add('hidden');
+      unlockScroll();
+    }
+
+    // ===== KOMUNIKASI KE BACKEND (Apps Script Web App via fetch) =====
+    // Ganti URL ini dengan URL Web App Apps Script kamu (berakhiran /exec).
+    var API_URL = "https://script.google.com/macros/s/AKfycbx7uEMGVqqReJ9JcPH9-q7_0Gbq1fC_J6D4h1680_CsDWuIaJiKXC84hBkGgCfO8PzUCg/exec";
+
+    // Setiap pemanggilan dikirim sebagai POST ke API_URL dengan body { action, args }.
+    // Content-Type text/plain sengaja dipakai agar tidak memicu preflight CORS di Apps Script.
+    // Balasan server: { data: hasil } jika sukses, { error: pesan } jika gagal.
+    function callApi(action, args) {
+      if (API_URL.indexOf("GANTI_") !== -1) {
+        return Promise.reject(new Error("API_URL belum diisi di index.html"));
+      }
+      return fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ action: action, args: args || [] })
+      }).then(function(response) {
+        return response.json().catch(function() { return {}; }).then(function(json) {
+          if (!response.ok || json.error) {
+            throw new Error(json.error || ("HTTP " + response.status));
+          }
+          return json.data;
+        });
+      });
+    }
+
+    function handleApiError(err) {
+      hideLoading();
+      alert("Gagal menghubungi server: " + (err && err.message ? err.message : err));
+    }
+
+    function initIndexedDB() {
+      return new Promise(function(resolve, reject) {
+        var request = indexedDB.open(DB_NAME, DB_VERSION);
+        request.onupgradeneeded = function(e) {
+          db = e.target.result;
+          if (!db.objectStoreNames.contains("tabel_wbp")) {
+            db.createObjectStore("tabel_wbp", { keyPath: "id" });
+          }
+          if (!db.objectStoreNames.contains("log_mutasi")) {
+            db.createObjectStore("log_mutasi", { autoIncrement: true });
+          }
+          if (!db.objectStoreNames.contains("log_keluar")) {
+            db.createObjectStore("log_keluar", { autoIncrement: true });
+          }
+          if (!db.objectStoreNames.contains("master_kamar")) {
+            db.createObjectStore("master_kamar", { keyPath: "kodeKamar" });
+          }
+        };
+        request.onsuccess = function(e) {
+          db = e.target.result;
+          resolve(db);
+        };
+        request.onerror = function(e) { reject(e); };
+      });
+    }
+
+    function getStoreData(storeName) {
+      return new Promise(function(resolve) {
+        if (!db) { resolve([]); return; }
+        var transaction = db.transaction(storeName, "readonly");
+        var store = transaction.objectStore(storeName);
+        var request = store.getAll();
+        request.onsuccess = function() { resolve(request.result || []); };
+        request.onerror = function() { resolve([]); };
+      });
+    }
+
+    function clearAndSaveStore(storeName, items) {
+      return new Promise(function(resolve) {
+        if (!db) { resolve(); return; }
+        var transaction = db.transaction(storeName, "readwrite");
+        var store = transaction.objectStore(storeName);
+        store.clear().onsuccess = function() {
+          if (items && items.length > 0) {
+            items.forEach(function(item) { store.put(item); });
+          }
+          resolve();
+        };
+      });
+    }
+
+    window.addEventListener("DOMContentLoaded", function() {
+      setupDragDropAndPaste();
+      loadDataFromServer();
+    });
+
+    function toggleOnlineOffline() {
+      isOfflineMode = !isOfflineMode;
+      var btn = document.getElementById("btn-toggle-online");
+      var dot = document.getElementById("toggle-indicator-dot");
+      var txt = document.getElementById("toggle-indicator-text");
+      var banner = document.getElementById("banner-offline");
+
+      if (isOfflineMode) {
+        btn.className = "flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 transition";
+        dot.className = "w-2 h-2 rounded-full bg-amber-400";
+        txt.innerText = "OFFLINE";
+        banner.classList.remove("hidden");
+        loadDataFromIndexedDB();
+      } else {
+        btn.className = "flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold bg-green-500/20 text-green-300 border border-green-500/40 hover:bg-green-500/30 transition";
+        dot.className = "w-2 h-2 rounded-full bg-green-400 animate-pulse";
+        txt.innerText = "ONLINE";
+        banner.classList.add("hidden");
+        loadDataFromServer();
+      }
+    }
+
+    function loadDataFromIndexedDB() {
+      showLoading("Membaca data dari IndexedDB lokal...");
+      initIndexedDB().then(function() {
+        return Promise.all([
+          getStoreData("tabel_wbp"),
+          getStoreData("log_mutasi"),
+          getStoreData("log_keluar"),
+          getStoreData("master_kamar")
+        ]);
+      }).then(function(results) {
+        hideLoading();
+        APP_DATA = {
+          tabel_wbp: results[0] || [],
+          log_mutasi: results[1] || [],
+          log_keluar: results[2] || [],
+          master_kamar: results[3] || []
+        };
+        renderHomeUI(APP_DATA.tabel_wbp);
+      }).catch(function(err) {
+        hideLoading();
+        alert("Gagal membaca IndexedDB: " + err);
+      });
+    }
+
+    function handleManualSync() {
+      if (isOfflineMode) {
+        loadDataFromIndexedDB();
+      } else {
+        loadDataFromServer();
+      }
+    }
+
+    function downloadToIndexedDB() {
+      showLoading("Mengunduh data realtime ke IndexedDB...");
+
+      callApi("getAllData", []).then(function(res) {
+          if (!res) res = { tabel_wbp: [], log_mutasi: [], log_keluar: [], master_kamar: [] };
+          
+          initIndexedDB().then(function() {
+            return Promise.all([
+              clearAndSaveStore("tabel_wbp", res.tabel_wbp || []),
+              clearAndSaveStore("log_mutasi", res.log_mutasi || []),
+              clearAndSaveStore("log_keluar", res.log_keluar || []),
+              clearAndSaveStore("master_kamar", res.master_kamar || [])
+            ]);
+          }).then(function() {
+            hideLoading();
+            APP_DATA = res;
+            renderHomeUI(APP_DATA.tabel_wbp);
+            alert("Berhasil!\nSeluruh data realtime (" + (res.tabel_wbp || []).length + " WBP) telah diperbarui di IndexedDB lokal.");
+          }).catch(function(err) {
+            hideLoading();
+            alert("Gagal mengunduh ke IndexedDB: " + err);
+          });
+        }, handleApiError);
+    }
+
+    function setupDragDropAndPaste() {
+      var dropZone = document.getElementById("drop-zone");
+      var editDropZone = document.getElementById("edit-drop-zone");
+
+      [dropZone, editDropZone].forEach(function(zone) {
+        if (!zone) return;
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(function(eventName) {
+          zone.addEventListener(eventName, function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+          }, false);
+        });
+
+        ['dragenter', 'dragover'].forEach(function(eventName) {
+          zone.addEventListener(eventName, function() { zone.classList.add("drop-active"); }, false);
+        });
+
+        ['dragleave', 'drop'].forEach(function(eventName) {
+          zone.addEventListener(eventName, function() { zone.classList.remove("drop-active"); }, false);
+        });
+      });
+
+      dropZone.addEventListener("drop", function(e) {
+        var files = e.dataTransfer.files;
+        if (files && files.length > 0) compressAndPreviewImage(files[0], 'add');
+      }, false);
+
+      editDropZone.addEventListener("drop", function(e) {
+        var files = e.dataTransfer.files;
+        if (files && files.length > 0) compressAndPreviewImage(files[0], 'edit');
+      }, false);
+
+      window.addEventListener("paste", function(e) {
+        var items = (e.clipboardData || e.originalEvent.clipboardData).items;
+        if (!items) return;
+        for (var i = 0; i < items.length; i++) {
+          if (items[i].type.indexOf("image") !== -1) {
+            var file = items[i].getAsFile();
+            if (!document.getElementById("modal-edit").classList.contains("hidden")) {
+              compressAndPreviewImage(file, 'edit');
+            } else {
+              compressAndPreviewImage(file, 'add');
+              document.getElementById("photo-preview-container").scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+            e.preventDefault();
+            break;
+          }
+        }
+      });
+    }
+
+    // KOMPRESI GAMBAR RINGAN MENGGUNAKAN URL.createObjectURL (ANTI-CRASH PADA HP)
+    function compressAndPreviewImage(file, targetMode) {
+      if (!file) return;
+
+      var fileType = (file.type || "").toLowerCase();
+      // Mendukung seluruh format foto HP (JPG, PNG, WEBP, HEIC, dll)
+      if (fileType && !fileType.startsWith("image/") && !file.name.match(/\.(jpg|jpeg|png|webp|bmp|heic)$/i)) {
+        alert("File yang dipilih bukan gambar!");
+        return;
+      }
+
+      var statusEl = document.getElementById(targetMode === 'edit' ? 'edit-photo-status' : 'photo-status');
+      if (statusEl) {
+        statusEl.innerText = "Sedang memproses & kompres foto...";
+        statusEl.className = "text-[9px] text-amber-600 font-bold mt-1";
+        statusEl.classList.remove("hidden");
+      }
+
+      // Gunakan URL.createObjectURL yang instan dan hemat RAM HP
+      var blobUrl = URL.createObjectURL(file);
+      var img = new Image();
+
+      img.onload = function() {
+        URL.revokeObjectURL(blobUrl);
+
+        var canvas = document.createElement("canvas");
+        var MAX_WIDTH = 400;
+        var MAX_HEIGHT = 500;
+        var width = img.width;
+        var height = img.height;
+
+        // Skala proporsional foto potret (tegak) khas HP
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height = Math.round((height * MAX_WIDTH) / width);
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width = Math.round((width * MAX_HEIGHT) / height);
+            height = MAX_HEIGHT;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+
+        var ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // Kompresi kualitas 0.6 (menghasilkan ukuran ~30KB - 50KB)
+        var base64 = canvas.toDataURL("image/jpeg", 0.6);
+
+        if (targetMode === 'edit') {
+          editCompressedPhotoBase64 = base64;
+          document.getElementById("edit-photo-preview").src = base64;
+          document.getElementById("edit-photo-preview-container").classList.remove("hidden");
+          if (statusEl) {
+            statusEl.innerText = "✓ Foto Baru Siap Diunggah";
+            statusEl.className = "text-[9px] text-green-600 font-bold mt-1";
+          }
+        } else {
+          compressedPhotoBase64 = base64;
+          document.getElementById("photo-preview").src = base64;
+          document.getElementById("photo-preview-container").classList.remove("hidden");
+        }
+      };
+
+      img.onerror = function() {
+        URL.revokeObjectURL(blobUrl);
+        alert("Gagal membaca file gambar dari HP. Coba pilih ulang.");
+      };
+
+      img.src = blobUrl;
+    }
+
+    function handleFileSelect(e) {
+      var file = e.target.files[0];
+      if (file) compressAndPreviewImage(file, 'add');
+    }
+
+  function handleEditFileSelect(e) {
+      var file = e.target.files && e.target.files[0];
+      if (file) compressAndPreviewImage(file, 'edit');
+    }
+
+    // FUNGSI KHUSUS PASTE GAMBAR DI BROWSER HP DARI CLIPBOARD
+    async function pasteImageFromClipboard(targetMode) {
+      try {
+        if (navigator.clipboard && navigator.clipboard.read) {
+          var items = await navigator.clipboard.read();
+          var foundImage = false;
+
+          for (var i = 0; i < items.length; i++) {
+            var item = items[i];
+            for (var j = 0; j < item.types.length; j++) {
+              var type = item.types[j];
+              if (type.startsWith("image/")) {
+                var blob = await item.getType(type);
+                compressAndPreviewImage(blob, targetMode);
+                foundImage = true;
+                break;
+              }
+            }
+            if (foundImage) break;
+          }
+
+          if (!foundImage) {
+            alert("Tidak ada gambar di clipboard HP Anda. Salin (copy) gambar terlebih dahulu.");
+          }
+        } else {
+          alert("Gunakan tombol 'Pilih dari Galeri / Kamera HP' untuk mengunggah foto.");
+        }
+      } catch (err) {
+        alert("Izin clipboard ditolak. Silakan pilih foto langsung dari galeri HP.");
+      }
+    }
+
+    function showLoading(msg) {
+      document.getElementById("loading-text").innerText = msg || "Sedang memproses...";
+      openModal("modal-loading");
+    }
+
+    function hideLoading() {
+      closeModal("modal-loading");
+    }
+
+    function checkLoginGuard(actionName) {
+      if (!isLoggedIn) {
+        alert("Akses Ditolak!\nAnda harus LOGIN sebagai Petugas Admin terlebih dahulu untuk melakukan " + (actionName || "aksi ini") + ".");
+        openLoginModal();
+        return false;
+      }
+      return true;
+    }
+
+    // POIN 4: MENDUKUNG AUTO-SCROLL KE WBP YANG BARU SAJA DIEDIT
+    function loadDataFromServer(scrollToWbpId) {
+      showLoading("Memuat Data...");
+
+      callApi("getAllData", []).then(function(res) {
+          hideLoading();
+          APP_DATA = res || { tabel_wbp: [], log_mutasi: [], log_keluar: [], master_kamar: [] };
+          renderHomeUI(APP_DATA.tabel_wbp);
+
+          if (scrollToWbpId) {
+            setTimeout(function() {
+              var cardEl = document.getElementById("wbp-card-" + scrollToWbpId);
+              if (cardEl) {
+                cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                cardEl.classList.add("highlight-section");
+                setTimeout(function() { cardEl.classList.remove("highlight-section"); }, 2500);
+              }
+            }, 300);
+          }
+        }, handleApiError);
+    }
+
+    function handleNavHomeClick() {
+      if (currentActiveView === 'home') {
+        document.getElementById("search-input").value = "";
+        filterByBlock('ALL');
+        var mainEl = document.querySelector('main');
+        if (mainEl) mainEl.scrollTo({ top: 0, behavior: 'smooth' });
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      } else {
+        switchView('home');
+      }
+    }
+
+    function switchView(viewName) {
+      if (viewName === 'add') {
+        if (!checkLoginGuard('Tambah WBP')) return;
+        resetForm();
+      }
+
+      currentActiveView = viewName;
+
+      document.getElementById("view-home").classList.add("hidden");
+      document.getElementById("view-add").classList.add("hidden");
+      document.getElementById("view-riwayat").classList.add("hidden");
+      
+      document.getElementById("nav-home").className = "flex flex-col items-center text-gray-400 font-medium text-[10px]";
+      document.getElementById("nav-add").className = "flex flex-col items-center text-gray-400 font-medium text-[10px]";
+      document.getElementById("nav-riwayat").className = "flex flex-col items-center text-gray-400 font-medium text-[10px]";
+      document.getElementById("fab-map").classList.add("hidden");
+
+      if (viewName === 'home') {
+        document.getElementById("view-home").classList.remove("hidden");
+        document.getElementById("nav-home").className = "flex flex-col items-center text-indigo-900 font-bold text-[10px]";
+        document.getElementById("fab-map").classList.remove("hidden");
+        renderHomeUI(APP_DATA.tabel_wbp);
+      } else if (viewName === 'add') {
+        document.getElementById("view-add").classList.remove("hidden");
+        document.getElementById("nav-add").className = "flex flex-col items-center text-indigo-900 font-bold text-[10px]";
+      } else if (viewName === 'riwayat') {
+        document.getElementById("view-riwayat").classList.remove("hidden");
+        document.getElementById("nav-riwayat").className = "flex flex-col items-center text-indigo-900 font-bold text-[10px]";
+        renderRiwayatList();
+      }
+    }
+
+    // RENDER HOME (DILENGKAPI ID CARD UNTUK FITUR SCROLL-BACK)
+    function renderHomeUI(data, searchQuery) {
+      var container = document.getElementById("wbp-list-container");
+      var pillsContainer = document.getElementById("filter-pills");
+      container.innerHTML = "";
+
+      var filtered = data || [];
+
+      if (activeBlockFilter && activeBlockFilter !== 'ALL') {
+        filtered = filtered.filter(function(wbp) {
+          var b = (wbp.blok || "").toUpperCase();
+          return b.indexOf(activeBlockFilter.toUpperCase()) === 0 || b === activeBlockFilter.toUpperCase();
+        });
+      }
+
+      if (searchQuery) {
+        var q = searchQuery.toUpperCase();
+        filtered = filtered.filter(function(item) {
+          var nameStr = (item.nama || "TANPA NAMA").toUpperCase();
+          var blokStr = (item.blok || "").toUpperCase();
+          var regStr = (item.nomorRegistrasi || "").toUpperCase();
+          var pidanaStr = (item.pidana || "").toUpperCase();
+          return (nameStr.indexOf(q) !== -1) || (blokStr.indexOf(q) !== -1) || (regStr.indexOf(q) !== -1) || (pidanaStr.indexOf(q) !== -1);
+        });
+      }
+
+      var groups = {};
+      filtered.forEach(function(wbp) {
+        var room = (wbp.blok || "LAINNYA").toUpperCase();
+        if (!groups[room]) groups[room] = [];
+        groups[room].push(wbp);
+      });
+
+      var uniqueBlocksMap = {};
+      (APP_DATA.master_kamar || []).forEach(function(m) {
+        var b = m.namaBlok || "Lainnya";
+        var prefix = (m.kodeKamar || "").charAt(0).toUpperCase();
+        if (m.kodeKamar === "KLINIK") prefix = "KLINIK";
+        if (!uniqueBlocksMap[b]) {
+          uniqueBlocksMap[b] = { label: b, prefix: prefix, count: 0 };
+        }
+      });
+
+      (APP_DATA.tabel_wbp || []).forEach(function(wbp) {
+        var rCode = (wbp.blok || "").toUpperCase();
+        for (var bName in uniqueBlocksMap) {
+          var p = uniqueBlocksMap[bName].prefix;
+          if (rCode.indexOf(p) === 0 || (p === "KLINIK" && rCode === "KLINIK")) {
+            uniqueBlocksMap[bName].count++;
+            break;
+          }
+        }
+      });
+
+      var totalAll = (APP_DATA.tabel_wbp || []).length;
+      var pillsHTML = '<span onclick="filterByBlock(\'ALL\')" class="px-3 py-1 rounded-full cursor-pointer whitespace-nowrap ' + (activeBlockFilter === 'ALL' ? 'bg-indigo-900 text-white' : 'bg-white border text-gray-700') + '">TOTAL: ' + totalAll + '</span>';
+
+      for (var bName in uniqueBlocksMap) {
+        var item = uniqueBlocksMap[bName];
+        var isSelected = (activeBlockFilter === item.prefix);
+        pillsHTML += '<span onclick="filterByBlock(\'' + item.prefix + '\')" class="px-3 py-1 rounded-full cursor-pointer whitespace-nowrap ' + (isSelected ? 'bg-indigo-900 text-white' : 'bg-white border text-gray-700') + '">' + item.label + ': ' + item.count + '</span>';
+      }
+      pillsContainer.innerHTML = pillsHTML;
+
+      if (Object.keys(groups).length === 0) {
+        container.innerHTML = '<div class="text-center py-10 text-gray-400 text-xs">Tidak ada data WBP di kamar/blok ini.</div>';
+        return;
+      }
+
+      var fragment = document.createDocumentFragment();
+      var sortedRooms = Object.keys(groups).sort(naturalSort);
+
+      sortedRooms.forEach(function(room) {
+        var roomSection = document.createElement("div");
+        roomSection.id = "kamar-section-" + room;
+        // POIN 3: PADDING ATAS 85PX AGAR TIDAK TERTUTUP NAVBAR SAAT JUMPING
+        roomSection.style.scrollMarginTop = "85px";
+        roomSection.className = "space-y-2 p-1.5 rounded-xl transition duration-500";
+
+        var customKet = "";
+        var masterItem = (APP_DATA.master_kamar || []).find(function(k) { return String(k.kodeKamar).toUpperCase() === room; });
+        if (masterItem && masterItem.keteranganKamar) {
+          customKet = ' <span class="text-gray-500 font-normal">(' + masterItem.keteranganKamar + ')</span>';
+        }
+
+        roomSection.innerHTML = 
+          '<div class="flex justify-between items-center bg-gray-200/80 px-3 py-1.5 rounded-lg text-xs font-bold text-gray-700">' +
+            '<span>Kamar ' + room + customKet + '</span>' +
+            '<span class="text-[10px] bg-gray-300 px-2 py-0.5 rounded-full">' + groups[room].length + ' Orang</span>' +
+          '</div>';
+
+        groups[room].forEach(function(wbp) {
+          var card = document.createElement("div");
+          // POIN 4: ID CARD UNTUK TARGET JUMP EDIT WBP
+          card.id = "wbp-card-" + wbp.id;
+          card.className = "bg-white p-3 rounded-xl shadow-sm border border-gray-100 flex gap-3 cursor-pointer hover:border-indigo-300 transition duration-500";
+          card.onclick = function() { openDetailModal(wbp); };
+
+          var fotoSrc = wbp.foto || 'https://via.placeholder.com/100x130?text=NO+IMAGE';
+          var namaTampil = wbp.nama || 'TANPA NAMA';
+          var noRegTampil = wbp.nomorRegistrasi || '-';
+
+          card.innerHTML = 
+            '<img src="' + fotoSrc + '" class="w-16 h-20 object-cover rounded-lg border bg-gray-50 flex-shrink-0" alt="Foto">' +
+            '<div class="flex-1 text-[11px] space-y-0.5">' +
+              '<div class="flex justify-between items-start">' +
+                '<h4 class="font-bold text-gray-900 text-xs uppercase">' + namaTampil + '</h4>' +
+                '<span class="text-[9px] bg-gray-100 text-gray-500 font-bold px-1.5 py-0.5 rounded">#' + wbp.id + '</span>' +
+              '</div>' +
+              '<p class="text-gray-500 font-semibold text-[10px]">NO. REGISTER: ' + noRegTampil + '</p>' +
+              '<p class="text-gray-600"><span class="font-semibold">PERKARA:</span> ' + (wbp.pidana || '-') + '</p>' +
+              '<p class="text-gray-600"><span class="font-semibold">PUTUSAN:</span> ' + (wbp.putusan || '-') + '</p>' +
+              '<p class="text-indigo-900 font-bold"><span class="font-semibold text-gray-600">EKSPIRASI:</span> ' + (wbp.tglEkspirasi || '-') + '</p>' +
+            '</div>';
+
+          roomSection.appendChild(card);
+        });
+
+        fragment.appendChild(roomSection);
+      });
+
+      container.appendChild(fragment);
+    }
+
+    function filterByBlock(prefix) {
+      activeBlockFilter = prefix;
+      renderHomeUI(APP_DATA.tabel_wbp);
+    }
+
+    function filterRoomSuggestions(val, targetBox) {
+      var box = document.getElementById("room-suggestions-" + targetBox);
+      if (!val) { box.classList.add("hidden"); return; }
+      var q = val.toUpperCase();
+      
+      var validList = (APP_DATA.master_kamar || []).map(function(k) { return String(k.kodeKamar).toUpperCase(); });
+      var matches = validList.filter(function(r) { return r.indexOf(q) !== -1; }).sort(naturalSort);
+      
+      if (matches.length > 0) {
+        box.innerHTML = matches.map(function(r) {
+          var mk = (APP_DATA.master_kamar || []).find(function(k) { return String(k.kodeKamar).toUpperCase() === r; });
+          var ket = (mk && mk.keteranganKamar) ? ' <span class="text-gray-400 text-[10px]">(' + mk.keteranganKamar + ')</span>' : '';
+          return '<div onclick="selectRoomSuggestion(\'' + r + '\', \'' + targetBox + '\')" class="p-2 hover:bg-indigo-50 cursor-pointer font-bold border-b text-gray-700">' + r + ket + '</div>';
+        }).join("");
+        box.classList.remove("hidden");
+      } else {
+        box.classList.add("hidden");
+      }
+    }
+
+    function selectRoomSuggestion(room, targetBox) {
+      if (targetBox === 'add') {
+        document.getElementById("input-kamar").value = room;
+        document.getElementById("room-suggestions-add").classList.add("hidden");
+      } else if (targetBox === 'edit') {
+        document.getElementById("edit-input-kamar").value = room;
+        document.getElementById("room-suggestions-edit").classList.add("hidden");
+      } else if (targetBox === 'mutasi') {
+        document.getElementById("mutasi-kamar").value = room;
+        document.getElementById("room-suggestions-mutasi").classList.add("hidden");
+      }
+    }
+
+    function isRoomValid(roomCode) {
+      if (!roomCode) return false;
+      var q = roomCode.toUpperCase().trim();
+      var validList = (APP_DATA.master_kamar || []).map(function(k) { return String(k.kodeKamar).toUpperCase(); });
+      return validList.indexOf(q) !== -1;
+    }
+
+    function handleFormSubmit(e) {
+      e.preventDefault();
+      if (isSubmitting) return;
+      if (!checkLoginGuard('Tambah WBP')) return;
+
+      var photoUrlInput = document.getElementById("foto-url-input").value;
+      var kamarInput = document.getElementById("input-kamar").value.toUpperCase().trim();
+
+      if (!kamarInput) { alert("Penempatan Kamar Tujuan wajib diisi!"); return; }
+      if (!isRoomValid(kamarInput)) {
+        alert("Peringatan!\nKamar " + kamarInput + " tidak terdaftar di database master kamar.");
+        return;
+      }
+
+      var payload = {
+        id: "",
+        foto: compressedPhotoBase64 || photoUrlInput || "",
+        nomorRegistrasi: document.getElementById("input-no-reg").value.toUpperCase(),
+        nama: document.getElementById("input-nama").value.toUpperCase(),
+        blok: kamarInput,
+        tglMasukUpt: document.getElementById("input-tgl-masuk-upt").value.toUpperCase(),
+        tglPenempatan: document.getElementById("input-tgl-penempatan").value.toUpperCase(),
+        pidana: document.getElementById("input-pidana").value.toUpperCase(),
+        tglEkspirasi: document.getElementById("input-ekspirasi").value.toUpperCase(),
+        putusan: document.getElementById("input-putusan").value.toUpperCase()
+      };
+
+      isSubmitting = true;
+      document.getElementById("btn-submit-wbp").disabled = true;
+      showLoading("Menyimpan Data WBP...");
+
+      callApi("saveOrUpdateWBP", [payload, false]).then(function(res) {
+        isSubmitting = false;
+        hideLoading();
+        alert("Data WBP Berhasil Disimpan! (ID: " + res.id + ")");
+        resetForm();
+        loadDataFromServer();
+        switchView('home');
+      }, function(err) {
+        isSubmitting = false;
+        hideLoading();
+        document.getElementById("btn-submit-wbp").disabled = false;
+        alert("Gagal menyimpan: " + err);
+      });
+    }
+
+    function resetForm() {
+      document.getElementById("wbp-form").reset();
+      compressedPhotoBase64 = "";
+      document.getElementById("input-id").value = "";
+      document.getElementById("photo-preview-container").classList.add("hidden");
+      document.getElementById("form-title").innerText = "Tambah WBP Baru";
+      document.getElementById("btn-submit-wbp").disabled = false;
+    }
+
+    function openDetailModal(wbp) {
+      currentSelectedWBP = wbp;
+      
+      document.getElementById("detail-badge-id").innerText = "ID: " + (wbp.id || "-");
+      document.getElementById("detail-nama").innerText = wbp.nama || "TANPA NAMA";
+      document.getElementById("detail-no-reg").innerText = "NO. REGISTER: " + (wbp.nomorRegistrasi || "-");
+      document.getElementById("detail-pidana").innerText = wbp.pidana || "-";
+      document.getElementById("detail-putusan").innerText = wbp.putusan || "-";
+      document.getElementById("detail-ekspirasi").innerText = wbp.tglEkspirasi || "-";
+      document.getElementById("detail-tgl-masuk-upt").innerText = wbp.tglMasukUpt || "-";
+      document.getElementById("detail-foto").src = wbp.foto || 'https://via.placeholder.com/100x130?text=NO+IMAGE';
+
+      var currentId = String(wbp.id || "").trim();
+      var currentReg = String(wbp.nomorRegistrasi || "").toUpperCase().trim();
+
+      var inmateRiwayat = (APP_DATA.log_mutasi || []).filter(function(r) {
+        var rId = String(r.id || "").trim();
+        var rReg = String(r.nomorRegistrasi || "").toUpperCase().trim();
+        return (rId && rId === currentId) || (currentReg && currentReg !== "-" && rReg === currentReg);
+      });
+
+      var displayTglMasuk = wbp.tglPenempatan || "";
+      if (inmateRiwayat.length > 0) {
+        var lastMutasi = inmateRiwayat[inmateRiwayat.length - 1];
+        if (lastMutasi.tglPenempatan) {
+          displayTglMasuk = lastMutasi.tglPenempatan;
+        } else if (lastMutasi.timestamp) {
+          var p = lastMutasi.timestamp.split(',')[0].trim();
+          if (p) displayTglMasuk = p;
+        }
+      }
+
+      document.getElementById("detail-tgl-masuk").innerText = displayTglMasuk || "-";
+
+      if (displayTglMasuk) {
+        var parts = displayTglMasuk.split('/');
+        if (parts.length === 3) {
+          var entryDate = new Date(parts[2], parts[1] - 1, parts[0]);
+          var diffDays = Math.floor((new Date() - entryDate) / (1000 * 60 * 60 * 24));
+          document.getElementById("detail-durasi-blok").innerText = "(" + (diffDays >= 0 ? diffDays : 0) + " HARI DI BLOK INI)";
+        } else {
+          document.getElementById("detail-durasi-blok").innerText = "";
+        }
+      } else {
+        document.getElementById("detail-durasi-blok").innerText = "";
+      }
+
+      var riwayatContainer = document.getElementById("detail-riwayat-mutasi-list");
+      riwayatContainer.innerHTML = "";
+
+      if (inmateRiwayat.length === 0) {
+        riwayatContainer.innerHTML = '<p class="text-[10px] text-gray-400 italic">Belum ada riwayat mutasi.</p>';
+      } else {
+        var reversedRiwayat = inmateRiwayat.slice().reverse();
+        reversedRiwayat.forEach(function(item) {
+          var div = document.createElement("div");
+          div.className = "bg-indigo-50/70 p-2 rounded-lg border border-indigo-100 text-[10px] space-y-0.5";
+          div.innerHTML = 
+            '<div class="flex justify-between font-bold text-indigo-900">' +
+              '<span>' + (item.dariKamar || "-") + ' <i class="fa-solid fa-arrow-right text-[9px] text-gray-400 mx-1"></i> ' + (item.keKamar || "-") + '</span>' +
+              '<span class="text-gray-500 font-normal">' + (item.timestamp || "") + '</span>' +
+            '</div>' +
+            '<div class="text-gray-600 font-medium"><span class="font-semibold">Alasan:</span> ' + (item.keterangan || "MUTASI") + '</div>';
+          riwayatContainer.appendChild(div);
+        });
+      }
+
+      openModal("modal-detail");
+    }
+
+    function openEditModalFromDetail() {
+      if (!checkLoginGuard('Edit Data WBP')) return;
+
+      closeModal('modal-detail');
+      editCompressedPhotoBase64 = "";
+
+      document.getElementById("edit-modal-title").innerText = "Edit WBP (ID: " + currentSelectedWBP.id + ")";
+      document.getElementById("edit-input-id").value = currentSelectedWBP.id || "";
+      document.getElementById("edit-input-no-reg").value = currentSelectedWBP.nomorRegistrasi || "";
+      document.getElementById("edit-input-nama").value = currentSelectedWBP.nama || "";
+      document.getElementById("edit-input-kamar").value = currentSelectedWBP.blok || "";
+      document.getElementById("edit-input-tgl-masuk-upt").value = currentSelectedWBP.tglMasukUpt || "";
+      document.getElementById("edit-input-tgl-penempatan").value = currentSelectedWBP.tglPenempatan || "";
+      document.getElementById("edit-input-pidana").value = currentSelectedWBP.pidana || "";
+      document.getElementById("edit-input-ekspirasi").value = currentSelectedWBP.tglEkspirasi || "";
+      document.getElementById("edit-input-putusan").value = currentSelectedWBP.putusan || "";
+
+      if (currentSelectedWBP.foto) {
+        document.getElementById("edit-photo-preview").src = currentSelectedWBP.foto;
+        document.getElementById("edit-photo-preview-container").classList.remove("hidden");
+      } else {
+        document.getElementById("edit-photo-preview-container").classList.add("hidden");
+      }
+
+      openModal("modal-edit");
+    }
+
+    // POIN 4: SETELAH SIMPAN EDIT, KEMBALI KE POSISI WBP TERSEBUT
+    function handleEditModalSubmit(e) {
+      e.preventDefault();
+      if (isSubmitting) return;
+
+      var kamarInput = document.getElementById("edit-input-kamar").value.toUpperCase().trim();
+      if (!kamarInput) { alert("Kamar / Blok wajib diisi!"); return; }
+      if (!isRoomValid(kamarInput)) {
+        alert("Peringatan!\nKamar " + kamarInput + " tidak terdaftar di database master kamar.");
+        return;
+      }
+
+      var finalFoto = editCompressedPhotoBase64 || currentSelectedWBP.foto || "";
+      var targetWbpId = document.getElementById("edit-input-id").value;
+
+      var payload = {
+        id: targetWbpId,
+        foto: finalFoto,
+        nomorRegistrasi: document.getElementById("edit-input-no-reg").value.toUpperCase(),
+        nama: document.getElementById("edit-input-nama").value.toUpperCase(),
+        blok: kamarInput,
+        tglMasukUpt: document.getElementById("edit-input-tgl-masuk-upt").value.toUpperCase(),
+        tglPenempatan: document.getElementById("edit-input-tgl-penempatan").value.toUpperCase(),
+        pidana: document.getElementById("edit-input-pidana").value.toUpperCase(),
+        tglEkspirasi: document.getElementById("edit-input-ekspirasi").value.toUpperCase(),
+        putusan: document.getElementById("edit-input-putusan").value.toUpperCase()
+      };
+
+      isSubmitting = true;
+      document.getElementById("btn-save-edit-modal").disabled = true;
+      showLoading("Menyimpan Perubahan Data WBP...");
+
+      callApi("saveOrUpdateWBP", [payload, true]).then(function(res) {
+        isSubmitting = false;
+        hideLoading();
+        document.getElementById("btn-save-edit-modal").disabled = false;
+        closeModal("modal-edit");
+        alert("Perubahan Data WBP Berhasil Disimpan!");
+        
+        // Memuat data baru dan otomatis melompat ke kartu WBP yang baru diedit
+        loadDataFromServer(targetWbpId);
+      }, function(err) {
+        isSubmitting = false;
+        hideLoading();
+        document.getElementById("btn-save-edit-modal").disabled = false;
+        alert("Gagal menyimpan perubahan: " + err);
+      });
+    }
+
+    function openMutasiModal() {
+      if (!checkLoginGuard('Mutasi Kamar WBP')) return;
+
+      closeModal('modal-detail');
+      document.getElementById("mutasi-kamar").value = "";
+      document.getElementById("mutasi-alasan").value = "";
+      openModal("modal-mutasi");
+    }
+
+    function executeMutasi() {
+      if (isSubmitting) return;
+
+      var keKamar = document.getElementById("mutasi-kamar").value.toUpperCase().trim();
+      var alasan = document.getElementById("mutasi-alasan").value.toUpperCase().trim();
+
+      if (!keKamar) { alert("Isi kamar tujuan!"); return; }
+      if (!isRoomValid(keKamar)) {
+        alert("Peringatan!\nKamar " + keKamar + " tidak valid.");
+        return;
+      }
+
+      var targetId = currentSelectedWBP.id;
+      var data = {
+        id: targetId,
+        nomorRegister: currentSelectedWBP.nomorRegistrasi,
+        keKamar: keKamar,
+        keterangan: alasan
+      };
+
+      isSubmitting = true;
+      document.getElementById("btn-submit-mutasi").disabled = true;
+      showLoading("Memproses Mutasi Kamar...");
+
+      callApi("mutasiWBP", [data]).then(function(res) {
+        isSubmitting = false;
+        hideLoading();
+        document.getElementById("btn-submit-mutasi").disabled = false;
+        closeModal('modal-mutasi');
+        alert("Mutasi berhasil disimpan!");
+        loadDataFromServer(targetId);
+        switchView('home');
+      }, function(err) {
+        isSubmitting = false;
+        hideLoading();
+        document.getElementById("btn-submit-mutasi").disabled = false;
+        alert("Gagal memproses mutasi: " + err);
+      });
+    }
+
+    function openHapusModal() {
+      if (!checkLoginGuard('Hapus/Proses Keluar WBP')) return;
+
+      closeModal('modal-detail');
+      openModal("modal-hapus");
+    }
+
+    function toggleLainnyaInput(val) {
+      if (val === "LAINNYA") {
+        document.getElementById("hapus-lainnya-container").classList.remove("hidden");
+      } else {
+        document.getElementById("hapus-lainnya-container").classList.add("hidden");
+      }
+    }
+
+    function executeHapus() {
+      if (isSubmitting) return;
+
+      var selectVal = document.getElementById("hapus-status").value;
+      var lainnyaText = document.getElementById("hapus-lainnya-text").value.toUpperCase();
+      var statusKet = selectVal === "LAINNYA" ? lainnyaText : selectVal;
+
+      var data = {
+        id: currentSelectedWBP.id,
+        nomorRegister: currentSelectedWBP.nomorRegistrasi,
+        keterangan: statusKet
+      };
+
+      isSubmitting = true;
+      document.getElementById("btn-submit-hapus").disabled = true;
+      showLoading("Memproses WBP Keluar...");
+
+      callApi("releaseWBP", [data]).then(function(res) {
+        isSubmitting = false;
+        hideLoading();
+        document.getElementById("btn-submit-hapus").disabled = false;
+        closeModal('modal-hapus');
+        alert("Status WBP Keluar berhasil diproses!");
+        loadDataFromServer();
+        switchView('home');
+      }, function(err) {
+        isSubmitting = false;
+        hideLoading();
+        document.getElementById("btn-submit-hapus").disabled = false;
+        alert("Gagal memproses keluar: " + err);
+      });
+    }
+
+    function switchRiwayatTab(tab) {
+      currentRiwayatTab = tab;
+      if (tab === 'pindah') {
+        document.getElementById("tab-btn-pindah").className = "py-2 rounded-lg bg-white shadow text-indigo-900 transition";
+        document.getElementById("tab-btn-keluar").className = "py-2 rounded-lg text-gray-500 hover:text-indigo-900 transition";
+      } else {
+        document.getElementById("tab-btn-keluar").className = "py-2 rounded-lg bg-white shadow text-indigo-900 transition";
+        document.getElementById("tab-btn-pindah").className = "py-2 rounded-lg text-gray-500 hover:text-indigo-900 transition";
+      }
+      renderRiwayatList();
+    }
+
+    function renderRiwayatList() {
+      var container = document.getElementById("riwayat-list-container");
+      container.innerHTML = "";
+      
+      var filterDate = document.getElementById("riwayat-date-filter").value;
+      var targetDateStr = "";
+      if (filterDate) {
+        var p = filterDate.split('-');
+        targetDateStr = p[2] + '/' + p[1] + '/' + p[0];
+      }
+
+      if (currentRiwayatTab === 'pindah') {
+        var items = (APP_DATA.log_mutasi || []).slice().reverse();
+        if (targetDateStr) {
+          items = items.filter(function(x) { return x.timestamp && x.timestamp.indexOf(targetDateStr) !== -1; });
+        }
+        var visibleItems = items.slice(0, riwayatDisplayLimit);
+        if (visibleItems.length === 0) {
+          container.innerHTML = '<div class="text-center py-8 text-xs text-gray-400">Tidak ada riwayat mutasi.</div>';
+          return;
+        }
+        visibleItems.forEach(function(item) {
+          var div = document.createElement("div");
+          div.className = "bg-white p-3 rounded-xl border shadow-sm text-xs space-y-1";
+          div.innerHTML = 
+            '<div class="flex justify-between text-[10px] text-gray-400 font-semibold">' +
+              '<span>' + (item.timestamp || "") + '</span>' +
+              '<span class="bg-indigo-50 text-indigo-900 px-2 py-0.5 rounded font-bold">' + (item.keterangan || 'MUTASI') + '</span>' +
+            '</div>' +
+            '<div class="flex justify-between items-center">' +
+              '<p class="font-bold text-gray-800 uppercase">' + (item.nama || "TANPA NAMA") + '</p>' +
+              '<span class="text-[9px] text-gray-400 font-bold">#' + (item.id || "") + '</span>' +
+            '</div>' +
+            '<p class="text-[10px] text-gray-500">' + (item.nomorRegistrasi || "-") + '</p>' +
+            '<div class="flex items-center gap-2 text-[11px] font-bold text-indigo-900 pt-1">' +
+              '<span>' + (item.dariKamar || "-") + '</span>' +
+              '<i class="fa-solid fa-arrow-right text-xs text-gray-400"></i>' +
+              '<span>' + (item.keKamar || "-") + '</span>' +
+            '</div>';
+          container.appendChild(div);
+        });
+      } else {
+        var items = (APP_DATA.log_keluar || []).slice().reverse();
+        if (targetDateStr) {
+          items = items.filter(function(x) { return x.timestamp && x.timestamp.indexOf(targetDateStr) !== -1; });
+        }
+        var visibleItems = items.slice(0, riwayatDisplayLimit);
+        if (visibleItems.length === 0) {
+          container.innerHTML = '<div class="text-center py-8 text-xs text-gray-400">Tidak ada log WBP keluar.</div>';
+          return;
+        }
+        visibleItems.forEach(function(item) {
+          var div = document.createElement("div");
+          div.className = "bg-white p-3 rounded-xl border shadow-sm text-xs space-y-1";
+          div.innerHTML = 
+            '<div class="flex justify-between text-[10px] text-gray-400 font-semibold">' +
+              '<span>' + (item.timestamp || "") + '</span>' +
+              '<span class="bg-red-50 text-red-600 px-2 py-0.5 rounded font-bold">' + (item.keterangan || "") + '</span>' +
+            '</div>' +
+            '<div class="flex justify-between items-center">' +
+              '<p class="font-bold text-gray-800 uppercase">' + (item.nama || "TANPA NAMA") + '</p>' +
+              '<span class="text-[9px] text-gray-400 font-bold">#' + (item.id || "") + '</span>' +
+            '</div>' +
+            '<p class="text-[10px] text-gray-500">' + (item.nomorRegistrasi || "-") + '</p>' +
+            '<p class="text-[10px] text-gray-600 pt-1"><span class="font-bold">KAMAR TERAKHIR:</span> ' + (item.kamarTerakhir || "") + '</p>';
+          container.appendChild(div);
+        });
+      }
+    }
+
+    function loadMoreRiwayat() {
+      riwayatDisplayLimit += 10;
+      renderRiwayatList();
+    }
+
+    function handleOpenMapButton() {
+      activeBlockFilter = 'ALL';
+      document.getElementById("search-input").value = "";
+      renderHomeUI(APP_DATA.tabel_wbp);
+      renderMapGrid();
+      openModal("modal-map");
+    }
+
+    function renderMapGrid() {
+      var data = APP_DATA.tabel_wbp || [];
+      var master = APP_DATA.master_kamar || [];
+      var gridContainer = document.getElementById("map-grid-container");
+      gridContainer.innerHTML = "";
+
+      var blockGroups = {};
+      master.forEach(function(item) {
+        var bName = item.namaBlok || "Lainnya";
+        if (!blockGroups[bName]) blockGroups[bName] = [];
+        blockGroups[bName].push(item);
+      });
+
+      for (var blockName in blockGroups) {
+        var blockWrapper = document.createElement("div");
+        blockWrapper.className = "space-y-2";
+        blockWrapper.innerHTML = '<h4 class="font-bold text-xs text-indigo-900 border-b pb-1">' + blockName + '</h4>';
+
+        var grid = document.createElement("div");
+        grid.className = "grid grid-cols-3 sm:grid-cols-4 gap-2";
+
+        var sortedRooms = blockGroups[blockName].sort(function(a, b) {
+          return naturalSort(a.kodeKamar, b.kodeKamar);
+        });
+
+        sortedRooms.forEach(function(roomItem) {
+          var rCode = String(roomItem.kodeKamar).toUpperCase();
+          var count = data.filter(function(w) { return String(w.blok || "").toUpperCase() === rCode; }).length;
+
+          var ketHTML = "";
+          if (roomItem.keteranganKamar && roomItem.keteranganKamar.trim() !== "") {
+            ketHTML = '<div class="text-[9px] text-indigo-700 font-medium leading-tight">(' + roomItem.keteranganKamar + ')</div>';
+          }
+
+          var tile = document.createElement("div");
+          tile.className = "bg-indigo-50 border border-indigo-100 rounded-lg p-2 text-center cursor-pointer hover:bg-indigo-100 hover:border-indigo-300 transition flex flex-col justify-between";
+          tile.onclick = (function(code) {
+            return function() { jumpToRoomFromMap(code); };
+          })(rCode);
+
+          tile.innerHTML = 
+            '<div>' +
+              '<div class="font-bold text-xs text-indigo-900">' + rCode + '</div>' +
+              ketHTML +
+            '</div>' +
+            '<div class="text-[9px] text-gray-500 font-semibold mt-1">' + count + ' Orang</div>';
+
+          grid.appendChild(tile);
+        });
+
+        blockWrapper.appendChild(grid);
+        gridContainer.appendChild(blockWrapper);
+      }
+    }
+
+    // POIN 3: PERBAIKAN SCROLL JUMP DENGAN JARAK PADDING 80PX DI BAWAH NAVBAR
+    // PERBAIKAN SCROLL JUMP: MEMINDAHKAN LAYAR TEPAT KE KAMAR DENGAN PADDING 80PX
+    function jumpToRoomFromMap(roomCode) {
+      var cleanCode = String(roomCode || "").toUpperCase().trim();
+
+      // 1. Tutup modal peta
+      closeModal('modal-map');
+
+      // 2. Pastikan berada di view home
+      if (currentActiveView !== 'home') {
+        switchView('home');
+      }
+
+      // 3. Reset filter ke TOTAL (ALL) agar semua kamar muncul di layar
+      activeBlockFilter = 'ALL';
+      var searchInput = document.getElementById("search-input");
+      if (searchInput) searchInput.value = "";
+      renderHomeUI(APP_DATA.tabel_wbp);
+
+      // 4. Eksekusi Scroll setelah DOM selesai dirender
+      setTimeout(function() {
+        // Cari elemen kamar berdasarkan ID
+        var el = document.getElementById("kamar-section-" + cleanCode);
+
+        // Fallback jika huruf kecil / spasi
+        if (!el) {
+          var allSections = document.querySelectorAll("[id^='kamar-section-']");
+          for (var i = 0; i < allSections.length; i++) {
+            if (allSections[i].id.toUpperCase() === ("KAMAR-SECTION-" + cleanCode)) {
+              el = allSections[i];
+              break;
+            }
+          }
+        }
+
+        // Jika kamar kosong (0 orang), cari kamar terdekat dalam blok yang sama
+        if (!el) {
+          alert("Kamar " + cleanCode + " saat ini kosong (0 WBP).");
+      return;
+}
+
+        if (el) {
+          // Beri jarak aman 80px agar judul kamar & jumlah orang terlihat jelas di bawah navbar
+          el.style.scrollMarginTop = "85px";
+
+          // A. Scroll halaman window / layar utama
+          var headerOffset = 80;
+          var elRect = el.getBoundingClientRect();
+          var currentY = window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop || 0;
+          var targetY = elRect.top + currentY - headerOffset;
+
+          window.scrollTo({
+            top: targetY,
+            behavior: 'smooth'
+          });
+
+          // B. Scroll kontainer jika dibuka di dalam webview tertentu
+          var container = document.getElementById("main-scroll-container");
+          if (container && container.scrollHeight > container.clientHeight) {
+            var containerRect = container.getBoundingClientRect();
+            var relTop = elRect.top - containerRect.top + container.scrollTop - 20;
+            container.scrollTo({
+              top: relTop,
+              behavior: 'smooth'
+            });
+          }
+
+          // C. Native smooth scrollIntoView
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+          // Efek highlight berkedip agar petugas langsung tahu letak kamarnya
+          el.classList.add("highlight-section");
+          setTimeout(function() { el.classList.remove("highlight-section"); }, 10000);
+
+        } else {
+          alert("Kamar " + cleanCode + " saat ini belum ada narapidana (kosong).");
+        }
+      }, 250);
+    }
+
+    function openSearchModal() {
+      openModal("modal-search");
+      document.getElementById("search-input").focus();
+    }
+
+    function handleSearch(q) {
+      renderHomeUI(APP_DATA.tabel_wbp, q);
+    }
+
+    function openLoginModal() {
+      if (isLoggedIn) {
+        if (confirm("Anda sedang login sebagai Admin.\nApakah Anda ingin Logout?")) {
+          isLoggedIn = false;
+          document.getElementById("login-indicator").classList.add("hidden");
+          alert("Anda telah Logout.");
+        }
+        return;
+      }
+      openModal("modal-login");
+    }
+
+    function handleLoginSubmit() {
+      var u = document.getElementById("login-username").value.trim();
+      var p = document.getElementById("login-password").value.trim();
+
+      if (!u || !p) { alert("Isi Username dan Password!"); return; }
+
+      showLoading("Memeriksa Akses Login...");
+
+      callApi("loginAdmin", [u, p]).then(function(res) {
+          hideLoading();
+          if (res && res.success) {
+            isLoggedIn = true;
+            document.getElementById("login-indicator").classList.remove("hidden");
+            closeModal('modal-login');
+            document.getElementById("login-username").value = "";
+            document.getElementById("login-password").value = "";
+            alert("Login Berhasil! Selamat datang " + res.username + ".");
+          } else {
+            alert(res.message || "Username atau Password salah!");
+          }
+        }, handleApiError);
+    }
+
+    function openDownloadChoiceModal() {
+      openModal("modal-download-choice");
+    }
+
+    function executeDownloadIndexedDB() {
+      closeModal("modal-download-choice");
+      downloadToIndexedDB();
+    }
+
+    // Helper konversi URL foto Google Drive menjadi Base64 lokal
+    function convertImgUrlToBase64(url) {
+  return new Promise(function(resolve) {
+
+    if (!url || typeof url !== "string") {
+      resolve(url || "");
+      return;
+    }
+
+    // Kalau sudah Base64, tidak perlu diproses lagi
+    if (url.indexOf("data:image/") === 0) {
+      resolve(url);
+      return;
+    }
+
+    // Kalau bukan URL HTTP, langsung gunakan
+    if (url.indexOf("http") !== 0) {
+      resolve(url);
+      return;
+    }
+
+    var img = new Image();
+
+    img.crossOrigin = "anonymous";
+
+    // Timeout supaya satu foto macet tidak menghentikan seluruh proses
+    var timeout = setTimeout(function() {
+      resolve(url);
+    }, 15000);
+
+    img.onload = function() {
+
+      clearTimeout(timeout);
+
+      try {
+
+        var originalWidth = img.naturalWidth || img.width || 300;
+        var originalHeight = img.naturalHeight || img.height || 400;
+
+        // Batas maksimum
+        var maxWidth = 300;
+        var maxHeight = 400;
+
+        var scale = Math.min(
+          maxWidth / originalWidth,
+          maxHeight / originalHeight,
+          1
+        );
+
+        var newWidth = Math.round(originalWidth * scale);
+        var newHeight = Math.round(originalHeight * scale);
+
+        var canvas = document.createElement("canvas");
+
+        canvas.width = newWidth;
+        canvas.height = newHeight;
+
+        var ctx = canvas.getContext("2d", {
+          alpha: false
+        });
+
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "medium";
+
+        ctx.drawImage(
+          img,
+          0,
+          0,
+          newWidth,
+          newHeight
+        );
+
+        // JPEG 0.65 = ukuran jauh lebih kecil
+        var dataURL = canvas.toDataURL(
+          "image/jpeg",
+          0.65
+        );
+
+        // Bersihkan
+        canvas.width = 1;
+        canvas.height = 1;
+
+        resolve(dataURL);
+
+      } catch (e) {
+
+        // Kalau canvas/CORS gagal,
+        // jangan hentikan seluruh proses
+        resolve(url);
+      }
+    };
+
+    img.onerror = function() {
+
+      clearTimeout(timeout);
+
+      // Foto gagal → tetap gunakan URL asli
+      resolve(url);
+    };
+
+    // Tambahkan cache-busting TIDAK dilakukan
+    // agar browser bisa menggunakan cache foto yang sudah pernah dibuka
+    img.src = url;
+  });
+}
+
+    // GENERATOR ARSIP FILE MHTML LENGKAP BESERTA FOTO
+ async function executeDownloadMHTML() {
+
+  closeModal("modal-download-choice");
+
+  var dataWbp = APP_DATA.tabel_wbp || [];
+
+  if (dataWbp.length === 0) {
+    alert("Tidak ada data WBP untuk diunduh!");
+    return;
+  }
+
+  showLoading(
+    "Menyiapkan foto " +
+    "0 / " +
+    dataWbp.length +
+    "..."
+  );
+
+  try {
+
+    // ========================================================
+    // 1. PROSES FOTO CEPAT
+    // ========================================================
+
+    var MAX_CONCURRENT = 10;
+
+    var wbpWithBase64 = new Array(dataWbp.length);
+
+    var nextIndex = 0;
+    var completed = 0;
+
+    async function photoWorker() {
+
+      while (true) {
+
+        var currentIndex = nextIndex++;
+
+        if (currentIndex >= dataWbp.length) {
+          break;
+        }
+
+        var item = Object.assign(
+          {},
+          dataWbp[currentIndex]
+        );
+
+        if (
+          item.foto &&
+          typeof item.foto === "string" &&
+          item.foto.indexOf("http") === 0
+        ) {
+
+          item.foto =
+            await convertImgUrlToBase64(item.foto);
+        }
+
+        wbpWithBase64[currentIndex] = item;
+
+        completed++;
+
+        if (
+          completed === 1 ||
+          completed % 5 === 0 ||
+          completed === dataWbp.length
+        ) {
+
+          showLoading(
+            "Menyiapkan foto " +
+            completed +
+            " / " +
+            dataWbp.length +
+            "..."
+          );
+        }
+      }
+    }
+
+    var workers = [];
+
+    var workerCount = Math.min(
+      MAX_CONCURRENT,
+      dataWbp.length
+    );
+
+    for (var w = 0; w < workerCount; w++) {
+      workers.push(photoWorker());
+    }
+
+    await Promise.all(workers);
+
+
+    // ========================================================
+    // 2. LANJUTKAN KODE LAMA KAMU DI SINI
+    // ========================================================
+
+    var groups = {};
+
+    wbpWithBase64.forEach(function(wbp) {
+
+      var room = (
+        wbp.blok || "LAINNYA"
+      ).toUpperCase();
+
+      if (!groups[room]) {
+        groups[room] = [];
+      }
+
+      groups[room].push(wbp);
+    });
+
+    var sortedRooms =
+      Object.keys(groups).sort(naturalSort);
+
+
+    // =========================================================
+    // 3. SORTING KAMAR
+    // =========================================================
+
+    var sortedRooms = Object.keys(groups).sort(naturalSort);
+
+
+    // =========================================================
+    // 4. BANGUN HTML
+    // =========================================================
+
+    var todayStr = new Date().toLocaleDateString("id-ID", {
+      day: "2-digit",
+      month: "long",
+      year: "numeric"
+    });
+
+    var bodyHtml = '<div style="max-width:500px;margin:0 auto;padding:15px;font-family:sans-serif;background:#f8fafc;color:#1e293b;">';
+
+    bodyHtml += '<div style="background:#312e81;color:white;padding:15px;border-radius:12px;margin-bottom:20px;text-align:center;">';
+
+    bodyHtml += '<h2 style="margin:0;font-size:18px;font-weight:bold;">E-STEREK GLADAKAN</h2>';
+
+    bodyHtml += '<p style="margin:4px 0 0;font-size:11px;opacity:.8;">Arsip Snapshot Offline &bull; ' + todayStr + '</p>';
+
+    bodyHtml += '<p style="margin:4px 0 0;font-size:12px;font-weight:bold;">Total: ' + dataWbp.length + ' Narapidana</p>';
+
+    bodyHtml += '</div>';
+
+
+    sortedRooms.forEach(function(room) {
+
+      bodyHtml += '<div style="margin-bottom:20px;">';
+
+      bodyHtml += '<div style="background:#e2e8f0;padding:8px 12px;border-radius:8px;font-weight:bold;font-size:13px;display:flex;justify-content:space-between;margin-bottom:8px;">';
+
+      bodyHtml += '<span>Kamar ' + room + '</span>';
+
+      bodyHtml += '<span style="font-size:11px;background:#cbd5e1;padding:2px 8px;border-radius:12px;">' +
+        groups[room].length +
+        ' Orang</span>';
+
+      bodyHtml += '</div>';
+
+
+      groups[room].forEach(function(wbp) {
+
+        var fotoSrc = wbp.foto || "https://via.placeholder.com/100x130?text=NO+IMAGE";
+
+        bodyHtml += '<div style="background:white;border:1px solid #e2e8f0;border-radius:10px;padding:10px;margin-bottom:8px;display:flex;gap:12px;align-items:flex-start;">';
+
+        bodyHtml += '<img src="' + fotoSrc + '" style="width:70px;height:90px;object-fit:cover;border-radius:6px;border:1px solid #cbd5e1;flex-shrink:0;" alt="Foto">';
+
+        bodyHtml += '<div style="font-size:11px;line-height:1.4;flex:1;">';
+
+        bodyHtml += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">';
+
+        bodyHtml += '<strong style="font-size:12px;color:#0f172a;">' +
+          (wbp.nama || "TANPA NAMA") +
+          '</strong>';
+
+        bodyHtml += '<span style="background:#e0e7ff;color:#3730a3;font-weight:bold;padding:2px 6px;border-radius:4px;font-size:10px;">#' +
+          wbp.id +
+          '</span>';
+
+        bodyHtml += '</div>';
+
+        bodyHtml += '<div style="color:#64748b;"><strong>No. Reg:</strong> ' + (wbp.nomorRegistrasi || "-") + '</div>';
+
+        bodyHtml += '<div style="color:#64748b;"><strong>Kamar/Blok:</strong> ' + (wbp.blok || "-") + '</div>';
+
+        bodyHtml += '<div style="color:#64748b;"><strong>Tgl Masuk UPT:</strong> ' + (wbp.tglMasukUpt || "-") + '</div>';
+
+        bodyHtml += '<div style="color:#64748b;"><strong>Tgl Penempatan:</strong> ' + (wbp.tglPenempatan || "-") + '</div>';
+
+        bodyHtml += '<div style="color:#64748b;"><strong>Pidana:</strong> ' + (wbp.pidana || "-") + '</div>';
+
+        bodyHtml += '<div style="color:#64748b;"><strong>Putusan:</strong> ' + (wbp.putusan || "-") + '</div>';
+
+        bodyHtml += '<div style="color:#312e81;font-weight:bold;"><strong>Ekspirasi:</strong> ' + (wbp.tglEkspirasi || "-") + '</div>';
+
+        bodyHtml += '</div></div>';
+
+      });
+
+      bodyHtml += '</div>';
+
+    });
+
+
+    bodyHtml += '<div style="text-align:center;font-size:10px;color:#94a3b8;padding:15px 0;">Diekspor secara otomatis oleh Sistem E-Sterek Gladakan</div>';
+
+    bodyHtml += '</div>';
+
+
+    // =========================================================
+    // 5. BUAT MHTML
+    // =========================================================
+
+    var boundary = "----=_NextPart_ESTEREK_" + Date.now();
+
+    var mhtmlLines = [
+      "From: <E-Sterek Gladakan>",
+      "Snapshot-Content-Location: http://localhost/esterek",
+      "Subject: E-Sterek Gladakan - Arsip Snapshot Offline",
+      "Date: " + new Date().toUTCString(),
+      "MIME-Version: 1.0",
+      'Content-Type: multipart/related; type="text/html"; boundary="' + boundary + '"',
+      "",
+      "--" + boundary,
+      'Content-Type: text/html; charset="utf-8"',
+      "Content-Transfer-Encoding: 8bit",
+      "Content-Location: http://localhost/esterek",
+      "",
+      '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Arsip E-Sterek Gladakan</title><meta name="viewport" content="width=device-width, initial-scale=1.0"></head><body>' +
+        bodyHtml +
+        '</body></html>',
+      "",
+      "--" + boundary + "--"
+    ];
+
+    var mhtmlContent = mhtmlLines.join("\r\n");
+
+
+    // =========================================================
+    // 6. DOWNLOAD
+    // =========================================================
+
+    var blob = new Blob(
+      [mhtmlContent],
+      { type: "message/rfc822;charset=utf-8" }
+    );
+
+    var downloadUrl = URL.createObjectURL(blob);
+
+    var a = document.createElement("a");
+
+    a.href = downloadUrl;
+
+    var timeStamp = new Date().toISOString().slice(0, 10);
+
+    a.download = "E-Sterek_Gladakan_Arsip_" + timeStamp + ".mhtml";
+
+    document.body.appendChild(a);
+
+    a.click();
+
+    document.body.removeChild(a);
+
+    URL.revokeObjectURL(downloadUrl);
+
+    hideLoading();
+
+    alert("Arsip MHTML berhasil diunduh!\nFile ini dapat dibuka langsung di Chrome/Edge tanpa internet.");
+
+  } catch (err) {
+
+    hideLoading();
+
+    alert("Gagal membuat arsip MHTML: " + err.message);
+
+  }
+}
+  </script>
+</body>
+</html>
