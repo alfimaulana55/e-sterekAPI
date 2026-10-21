@@ -506,7 +506,7 @@
     var activeBlockFilter = 'ALL';
 
     var DB_NAME = "E_Sterek_DB";
-    var DB_VERSION = 3;
+    var DB_VERSION = 4;
     var db = null;
 
     function naturalSort(a, b) {
@@ -541,7 +541,7 @@
 
     // ===== KOMUNIKASI KE BACKEND (Apps Script Web App via fetch) =====
     // Ganti URL ini dengan URL Web App Apps Script kamu (berakhiran /exec).
-    var API_URL = "https://script.google.com/macros/s/AKfycbx7uEMGVqqReJ9JcPH9-q7_0Gbq1fC_J6D4h1680_CsDWuIaJiKXC84hBkGgCfO8PzUCg/exec";
+    var API_URL = "https://script.google.com/macros/s/GANTI_DENGAN_ID_DEPLOYMENT/exec";
 
     // Setiap pemanggilan dikirim sebagai POST ke API_URL dengan body { action, args }.
     // Content-Type text/plain sengaja dipakai agar tidak memicu preflight CORS di Apps Script.
@@ -586,6 +586,9 @@
           if (!db.objectStoreNames.contains("master_kamar")) {
             db.createObjectStore("master_kamar", { keyPath: "kodeKamar" });
           }
+          if (!db.objectStoreNames.contains("outbox")) {
+            db.createObjectStore("outbox", { autoIncrement: true });
+          }
         };
         request.onsuccess = function(e) {
           db = e.target.result;
@@ -622,7 +625,7 @@
 
     window.addEventListener("DOMContentLoaded", function() {
       setupDragDropAndPaste();
-      loadDataFromServer();
+      bootstrapApp();
     });
 
     function toggleOnlineOffline() {
@@ -680,6 +683,10 @@
     }
 
     function downloadToIndexedDB() {
+      if (outboxQueue.length > 0) {
+        alert("Masih ada perubahan yang sedang disinkronkan.\nTunggu sampai selesai, lalu coba lagi.");
+        return;
+      }
       showLoading("Mengunduh data realtime ke IndexedDB...");
 
       callApi("getAllData", []).then(function(res) {
@@ -893,24 +900,7 @@
 
     // POIN 4: MENDUKUNG AUTO-SCROLL KE WBP YANG BARU SAJA DIEDIT
     function loadDataFromServer(scrollToWbpId) {
-      showLoading("Memuat Data...");
-
-      callApi("getAllData", []).then(function(res) {
-          hideLoading();
-          APP_DATA = res || { tabel_wbp: [], log_mutasi: [], log_keluar: [], master_kamar: [] };
-          renderHomeUI(APP_DATA.tabel_wbp);
-
-          if (scrollToWbpId) {
-            setTimeout(function() {
-              var cardEl = document.getElementById("wbp-card-" + scrollToWbpId);
-              if (cardEl) {
-                cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                cardEl.classList.add("highlight-section");
-                setTimeout(function() { cardEl.classList.remove("highlight-section"); }, 2500);
-              }
-            }, 300);
-          }
-        }, handleApiError);
+      return refreshFromServer(scrollToWbpId);
     }
 
     function handleNavHomeClick() {
@@ -1064,7 +1054,7 @@
             '<div class="flex-1 text-[11px] space-y-0.5">' +
               '<div class="flex justify-between items-start">' +
                 '<h4 class="font-bold text-gray-900 text-xs uppercase">' + namaTampil + '</h4>' +
-                '<span class="text-[9px] bg-gray-100 text-gray-500 font-bold px-1.5 py-0.5 rounded">#' + wbp.id + '</span>' +
+                '<span class="text-[9px] bg-gray-100 text-gray-500 font-bold px-1.5 py-0.5 rounded">#' + displayId(wbp.id) + '</span>' +
               '</div>' +
               '<p class="text-gray-500 font-semibold text-[10px]">NO. REGISTER: ' + noRegTampil + '</p>' +
               '<p class="text-gray-600"><span class="font-semibold">PERKARA:</span> ' + (wbp.pidana || '-') + '</p>' +
@@ -1126,9 +1116,340 @@
       return validList.indexOf(q) !== -1;
     }
 
+    // =====================================================================
+    // SYNC ENGINE
+    // Perubahan langsung tampil di layar (optimistic), lalu dikirim ke server
+    // di latar belakang lewat antrean (outbox). Data disimpan di IndexedDB,
+    // jadi pembukaan aplikasi berikutnya langsung tampil tanpa menunggu server.
+    // =====================================================================
+    var outboxQueue = [];        // [{ key, ready, data, attempts }], urut sesuai aksi
+    var outboxBusy = false;      // true saat satu operasi sedang dikirim
+    var outboxRetryTimer = null;
+    var outboxWasPending = false;
+    var tempIdMap = {};          // ID sementara (TMP-...) -> ID asli dari server
+    var refreshWanted = false;   // muat ulang dari server begitu antrean kosong
+    var MAX_ATTEMPTS = 6;
+    var toastTimer = null;
+
+    // ----- waktu & format: string biasa dalam zona Asia/Jakarta -----
+    function jakartaParts() {
+      var parts = new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Asia/Jakarta", day: "2-digit", month: "2-digit", year: "numeric",
+        hour: "2-digit", minute: "2-digit", hourCycle: "h23"
+      }).formatToParts(new Date());
+      var out = {};
+      parts.forEach(function(p) { out[p.type] = p.value; });
+      return out;
+    }
+    function todayDMY() {
+      var p = jakartaParts();
+      return p.day + "/" + p.month + "/" + p.year;
+    }
+    function nowWIB() {
+      var p = jakartaParts();
+      return p.day + "/" + p.month + "/" + p.year + ", " + p.hour + ":" + p.minute + " WIB";
+    }
+
+    // ----- helper data lokal -----
+    function isTempId(id) { return String(id).indexOf("TMP-") === 0; }
+    function displayId(id) { return isTempId(id) ? "BARU" : String(id); }
+    function resolveId(id) { var k = String(id); return tempIdMap[k] || k; }
+    function findWbpById(id) {
+      var key = String(id);
+      var list = APP_DATA.tabel_wbp || [];
+      for (var i = 0; i < list.length; i++) {
+        if (String(list[i].id) === key) return list[i];
+      }
+      return null;
+    }
+    function toLocalPhotoUrl(url) {
+      if (!url) return "";
+      if (url.indexOf("data:image") === 0) return url;
+      var m = url.match(/[-\w]{25,}/);
+      return m ? "https://lh3.googleusercontent.com/d/" + m[0] + "=s250" : url;
+    }
+    function scrollToCard(id) {
+      setTimeout(function() {
+        var cardEl = document.getElementById("wbp-card-" + id);
+        if (cardEl) {
+          cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          cardEl.classList.add("highlight-section");
+          setTimeout(function() { cardEl.classList.remove("highlight-section"); }, 2500);
+        }
+      }, 300);
+    }
+
+    // ----- IndexedDB (tidak pernah reject; gagal = dicatat, data tetap di memori) -----
+    function idbRun(storeName, mode, makeRequest) {
+      return new Promise(function(resolve) {
+        try {
+          if (!db) { resolve(null); return; }
+          var tx = db.transaction(storeName, mode);
+          var req = makeRequest(tx.objectStore(storeName));
+          var result = null;
+          req.onsuccess = function() { result = req.result; };
+          tx.oncomplete = function() { resolve(result); };
+          tx.onerror = tx.onabort = function() {
+            console.warn("IndexedDB " + storeName + ":", tx.error);
+            resolve(null);
+          };
+        } catch (err) {
+          console.warn("IndexedDB " + storeName + ":", err);
+          resolve(null);
+        }
+      });
+    }
+    function idbPutWbp(rec) {
+      return idbRun("tabel_wbp", "readwrite", function(s) { return s.put(rec); });
+    }
+    function idbDeleteWbp(id) {
+      return idbRun("tabel_wbp", "readwrite", function(s) { return s.delete(String(id)); });
+    }
+    function idbAddLog(storeName, item) {
+      return idbRun(storeName, "readwrite", function(s) { return s.add(item); });
+    }
+    function idbAddOutbox(data) {
+      return idbRun("outbox", "readwrite", function(s) { return s.add(data); });
+    }
+    function idbDeleteOutbox(key) {
+      return idbRun("outbox", "readwrite", function(s) { return s.delete(key); });
+    }
+    function loadOutboxEntries() {
+      return new Promise(function(resolve) {
+        var list = [];
+        try {
+          if (!db) { resolve(list); return; }
+          var req = db.transaction("outbox", "readonly").objectStore("outbox").openCursor();
+          req.onsuccess = function(e) {
+            var cur = e.target.result;
+            if (cur) {
+              list.push({ key: cur.key, ready: Promise.resolve(), data: cur.value, attempts: 0 });
+              cur.continue();
+            } else {
+              resolve(list);
+            }
+          };
+          req.onerror = function() { resolve(list); };
+        } catch (err) {
+          resolve(list);
+        }
+      });
+    }
+    function saveSnapshot(data) {
+      return Promise.all([
+        clearAndSaveStore("tabel_wbp", data.tabel_wbp || []),
+        clearAndSaveStore("log_mutasi", data.log_mutasi || []),
+        clearAndSaveStore("log_keluar", data.log_keluar || []),
+        clearAndSaveStore("master_kamar", data.master_kamar || [])
+      ]);
+    }
+
+    // ----- antrean operasi (outbox) -----
+    function enqueueOp(data) {
+      var entry = { key: null, ready: null, data: data, attempts: 0 };
+      entry.ready = idbAddOutbox(data).then(function(k) { entry.key = k; });
+      outboxQueue.push(entry);
+      processOutbox();
+    }
+    function removeEntry(entry) {
+      outboxQueue = outboxQueue.filter(function(e) { return e !== entry; });
+      return entry.ready.then(function() {
+        if (entry.key !== null && entry.key !== undefined) return idbDeleteOutbox(entry.key);
+      });
+    }
+    // Susun argumen server dari data operasi; null = ID asli belum tersedia
+    function buildArgs(d) {
+      if (d.kind === "save") {
+        var p = Object.assign({}, d.payload);
+        if (d.isEdit) p.id = resolveId(d.payload.id);
+        if (isTempId(p.id)) return null;
+        return [p, !!d.isEdit];
+      }
+      var id = resolveId(d.targetId);
+      if (isTempId(id)) return null;
+      return [Object.assign({}, d.body, { id: id })];
+    }
+    // Setelah server membalas: ganti ID sementara dengan ID asli
+    function applyOpResult(d, res) {
+      if (d.kind !== "save") return;
+      if (!d.isEdit) {
+        var realId = String(res.id);
+        tempIdMap[d.tmpId] = realId;
+        var rec = findWbpById(d.tmpId);
+        if (rec) {
+          rec.id = realId;
+          if (res.fotoUrl) rec.foto = res.fotoUrl;
+          idbDeleteWbp(d.tmpId).then(function() { return idbPutWbp(rec); });
+        }
+        (APP_DATA.log_mutasi || []).concat(APP_DATA.log_keluar || []).forEach(function(l) {
+          if (String(l.id) === d.tmpId) l.id = realId;
+        });
+      } else {
+        var r2 = findWbpById(resolveId(d.payload.id));
+        if (r2 && res.fotoUrl) {
+          r2.foto = res.fotoUrl;
+          idbPutWbp(r2);
+        }
+      }
+    }
+    function processOutbox() {
+      if (outboxRetryTimer) { clearTimeout(outboxRetryTimer); outboxRetryTimer = null; }
+      if (outboxBusy) return;
+
+      if (outboxQueue.length === 0) {
+        if (outboxWasPending) { outboxWasPending = false; setSyncState("synced", 0); }
+        if (refreshWanted) { refreshWanted = false; refreshFromServer(null); }
+        return;
+      }
+
+      var entry = outboxQueue[0];
+      outboxWasPending = true;
+      var args = buildArgs(entry.data);
+      if (args === null) {
+        reportFailure("ID WBP belum tersedia di server.");
+        removeEntry(entry).then(processOutbox);
+        return;
+      }
+
+      outboxBusy = true;
+      setSyncState("syncing", outboxQueue.length);
+
+      callApi(entry.data.action, args).then(function(res) {
+        if (res && res.success === false) {
+          var e = new Error(res.message || "Data tidak ditemukan di server.");
+          e.rejected = true;
+          throw e;
+        }
+        applyOpResult(entry.data, res);
+        renderCurrentView();   // tampilkan ID asli di kartu yang tadinya ID sementara
+      }).then(function() {
+        outboxBusy = false;
+        return removeEntry(entry).then(processOutbox);
+      }, function(err) {
+        outboxBusy = false;
+        if (err && err.rejected) {
+          // Server menolak secara permanen: buang operasi dan muat ulang data server
+          reportFailure(err.message);
+          removeEntry(entry).then(processOutbox);
+          return;
+        }
+        // Jaringan/server bermasalah: coba lagi dengan jeda yang makin panjang
+        entry.attempts += 1;
+        if (entry.attempts >= MAX_ATTEMPTS) {
+          reportFailure("Gagal terhubung ke server berulang kali. " + (err && err.message ? err.message : ""));
+          removeEntry(entry).then(processOutbox);
+          return;
+        }
+        var delay = Math.min(30000, 1000 * Math.pow(2, entry.attempts));
+        setSyncState("offline", outboxQueue.length);
+        outboxRetryTimer = setTimeout(processOutbox, delay);
+      });
+    }
+    function reportFailure(msg) {
+      refreshWanted = true;
+      setSyncState("error", outboxQueue.length);
+      alert("Perubahan gagal disimpan ke server:\n" + msg + "\n\nData akan dimuat ulang dari server.");
+    }
+    window.addEventListener("online", function() { processOutbox(); });
+
+    // ----- indikator & notifikasi (tidak memblokir layar) -----
+    function setSyncState(status, count) {
+      var el = document.getElementById("sync-pill");
+      if (!el) {
+        el = document.createElement("div");
+        el.id = "sync-pill";
+        el.style.cssText = "position:fixed;left:50%;bottom:90px;transform:translateX(-50%);z-index:9998;padding:6px 14px;border-radius:999px;font:600 11px/1.2 system-ui,sans-serif;color:#fff;box-shadow:0 6px 16px rgba(0,0,0,.2);pointer-events:none;opacity:0;transition:opacity .25s;white-space:nowrap;";
+        document.body.appendChild(el);
+      }
+      var text = "", bg = "#334155";
+      if (status === "syncing") { text = "Menyinkronkan " + count + " perubahan…"; bg = "#4f46e5"; }
+      else if (status === "offline") { text = "Offline · " + count + " perubahan menunggu koneksi"; bg = "#d97706"; }
+      else if (status === "error") { text = "Ada perubahan yang gagal"; bg = "#dc2626"; }
+      else if (status === "synced") { text = "✓ Tersinkron"; bg = "#059669"; }
+      el.innerText = text;
+      el.style.background = bg;
+      el.style.opacity = "1";
+      if (status === "synced") {
+        setTimeout(function() { if (outboxQueue.length === 0) el.style.opacity = "0"; }, 1200);
+      }
+    }
+    function showToast(msg) {
+      var el = document.getElementById("app-toast");
+      if (!el) {
+        el = document.createElement("div");
+        el.id = "app-toast";
+        el.style.cssText = "position:fixed;left:50%;top:16px;transform:translateX(-50%);z-index:10000;background:#1e1b4b;color:#fff;padding:8px 14px;border-radius:12px;font:600 12px/1.3 system-ui,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.25);opacity:0;transition:opacity .2s;max-width:90vw;text-align:center;pointer-events:none;";
+        document.body.appendChild(el);
+      }
+      el.innerText = msg;
+      el.style.opacity = "1";
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(function() { el.style.opacity = "0"; }, 1800);
+    }
+
+    // ----- muat dari server (dipakai saat awal, manual sync, dan setelah antrean kosong) -----
+    function refreshFromServer(scrollToWbpId) {
+      var hasData = (APP_DATA.tabel_wbp || []).length > 0 || (APP_DATA.master_kamar || []).length > 0;
+      if (outboxQueue.length > 0 && hasData) {
+        refreshWanted = true;
+        showToast("Menunggu perubahan terkirim ke server, lalu data dimuat ulang.");
+        return Promise.resolve();
+      }
+      var spinner = !hasData;
+      if (spinner) showLoading("Memuat Data...");
+
+      return callApi("getAllData", []).then(function(res) {
+        if (spinner) hideLoading();
+        if (outboxQueue.length > 0) { refreshWanted = true; return; }
+        applyServerData(res, scrollToWbpId);
+      }, function(err) {
+        if (spinner) { hideLoading(); handleApiError(err); }
+        else showToast("Tidak bisa terhubung ke server. Menampilkan data tersimpan.");
+      });
+    }
+    function renderCurrentView() {
+      renderHomeUI(APP_DATA.tabel_wbp);
+      if (currentActiveView === 'riwayat') renderRiwayatList();
+    }
+    function applyServerData(res, scrollToWbpId) {
+      var next = res || { tabel_wbp: [], log_mutasi: [], log_keluar: [], master_kamar: [] };
+      // Bandingkan dengan salinan terakhir yang disimpan, bukan APP_DATA
+      // (APP_DATA bisa sudah berubah lokal, mis. ID sementara -> ID asli)
+      var changed = JSON.stringify(next) !== JSON.stringify(APP_DATA);
+      APP_DATA = next;
+      renderCurrentView();      // selalu render ulang agar layar pasti sesuai data server
+      if (changed) saveSnapshot(next);
+      if (scrollToWbpId) scrollToCard(resolveId(scrollToWbpId));
+    }
+
+    // ----- start: tampil dari cache lokal dulu, lalu sinkron di latar belakang -----
+    function bootstrapApp() {
+      initIndexedDB().then(function() {
+        return Promise.all([
+          getStoreData("tabel_wbp"),
+          getStoreData("log_mutasi"),
+          getStoreData("log_keluar"),
+          getStoreData("master_kamar"),
+          loadOutboxEntries()
+        ]);
+      }).then(function(r) {
+        var hasCache = r[0].length > 0 || r[3].length > 0;
+        if (hasCache) {
+          APP_DATA = { tabel_wbp: r[0], log_mutasi: r[1], log_keluar: r[2], master_kamar: r[3] };
+          renderHomeUI(APP_DATA.tabel_wbp);
+        }
+        outboxQueue = r[4].concat(outboxQueue);
+        if (outboxQueue.length > 0) outboxWasPending = true;
+        processOutbox();
+        return refreshFromServer(null);
+      }).catch(function(err) {
+        console.warn("Cache lokal tidak bisa dibaca, memuat dari server:", err);
+        return refreshFromServer(null);
+      });
+    }
+
     function handleFormSubmit(e) {
       e.preventDefault();
-      if (isSubmitting) return;
       if (!checkLoginGuard('Tambah WBP')) return;
 
       var photoUrlInput = document.getElementById("foto-url-input").value;
@@ -1153,23 +1474,27 @@
         putusan: document.getElementById("input-putusan").value.toUpperCase()
       };
 
-      isSubmitting = true;
-      document.getElementById("btn-submit-wbp").disabled = true;
-      showLoading("Menyimpan Data WBP...");
+      // Tampilkan seketika dengan ID sementara; ID asli menyusul dari server
+      var tmpId = "TMP-" + Date.now() + "-" + Math.floor(Math.random() * 100000);
+      var rec = {
+        id: tmpId,
+        foto: toLocalPhotoUrl(payload.foto),
+        nomorRegistrasi: payload.nomorRegistrasi,
+        nama: payload.nama,
+        blok: payload.blok,
+        tglMasukUpt: payload.tglMasukUpt,
+        tglPenempatan: payload.tglPenempatan,
+        pidana: payload.pidana,
+        tglEkspirasi: payload.tglEkspirasi,
+        putusan: payload.putusan
+      };
+      APP_DATA.tabel_wbp.push(rec);
+      idbPutWbp(rec);
+      enqueueOp({ kind: "save", action: "saveOrUpdateWBP", tmpId: tmpId, isEdit: false, payload: payload });
 
-      callApi("saveOrUpdateWBP", [payload, false]).then(function(res) {
-        isSubmitting = false;
-        hideLoading();
-        alert("Data WBP Berhasil Disimpan! (ID: " + res.id + ")");
-        resetForm();
-        loadDataFromServer();
-        switchView('home');
-      }, function(err) {
-        isSubmitting = false;
-        hideLoading();
-        document.getElementById("btn-submit-wbp").disabled = false;
-        alert("Gagal menyimpan: " + err);
-      });
+      resetForm();
+      switchView('home');
+      showToast("Data WBP tersimpan. Menyinkronkan…");
     }
 
     function resetForm() {
@@ -1184,7 +1509,7 @@
     function openDetailModal(wbp) {
       currentSelectedWBP = wbp;
       
-      document.getElementById("detail-badge-id").innerText = "ID: " + (wbp.id || "-");
+      document.getElementById("detail-badge-id").innerText = "ID: " + displayId(wbp.id || "-");
       document.getElementById("detail-nama").innerText = wbp.nama || "TANPA NAMA";
       document.getElementById("detail-no-reg").innerText = "NO. REGISTER: " + (wbp.nomorRegistrasi || "-");
       document.getElementById("detail-pidana").innerText = wbp.pidana || "-";
@@ -1257,7 +1582,7 @@
       closeModal('modal-detail');
       editCompressedPhotoBase64 = "";
 
-      document.getElementById("edit-modal-title").innerText = "Edit WBP (ID: " + currentSelectedWBP.id + ")";
+      document.getElementById("edit-modal-title").innerText = "Edit WBP (ID: " + displayId(currentSelectedWBP.id) + ")";
       document.getElementById("edit-input-id").value = currentSelectedWBP.id || "";
       document.getElementById("edit-input-no-reg").value = currentSelectedWBP.nomorRegistrasi || "";
       document.getElementById("edit-input-nama").value = currentSelectedWBP.nama || "";
@@ -1281,7 +1606,6 @@
     // POIN 4: SETELAH SIMPAN EDIT, KEMBALI KE POSISI WBP TERSEBUT
     function handleEditModalSubmit(e) {
       e.preventDefault();
-      if (isSubmitting) return;
 
       var kamarInput = document.getElementById("edit-input-kamar").value.toUpperCase().trim();
       if (!kamarInput) { alert("Kamar / Blok wajib diisi!"); return; }
@@ -1290,12 +1614,14 @@
         return;
       }
 
-      var finalFoto = editCompressedPhotoBase64 || currentSelectedWBP.foto || "";
       var targetWbpId = document.getElementById("edit-input-id").value;
+      // Kosong = pakai foto yang sudah ada di server (tidak perlu upload ulang)
+      var newPhoto = editCompressedPhotoBase64 || "";
+      editCompressedPhotoBase64 = "";
 
       var payload = {
         id: targetWbpId,
-        foto: finalFoto,
+        foto: newPhoto,
         nomorRegistrasi: document.getElementById("edit-input-no-reg").value.toUpperCase(),
         nama: document.getElementById("edit-input-nama").value.toUpperCase(),
         blok: kamarInput,
@@ -1306,25 +1632,25 @@
         putusan: document.getElementById("edit-input-putusan").value.toUpperCase()
       };
 
-      isSubmitting = true;
-      document.getElementById("btn-save-edit-modal").disabled = true;
-      showLoading("Menyimpan Perubahan Data WBP...");
+      var rec = findWbpById(targetWbpId);
+      if (rec) {
+        rec.nomorRegistrasi = payload.nomorRegistrasi;
+        rec.nama = payload.nama;
+        rec.blok = payload.blok;
+        rec.tglMasukUpt = payload.tglMasukUpt;
+        rec.tglPenempatan = payload.tglPenempatan;
+        rec.pidana = payload.pidana;
+        rec.tglEkspirasi = payload.tglEkspirasi;
+        rec.putusan = payload.putusan;
+        if (newPhoto) rec.foto = toLocalPhotoUrl(newPhoto);
+        idbPutWbp(rec);
+      }
+      enqueueOp({ kind: "save", action: "saveOrUpdateWBP", tmpId: null, isEdit: true, payload: payload });
 
-      callApi("saveOrUpdateWBP", [payload, true]).then(function(res) {
-        isSubmitting = false;
-        hideLoading();
-        document.getElementById("btn-save-edit-modal").disabled = false;
-        closeModal("modal-edit");
-        alert("Perubahan Data WBP Berhasil Disimpan!");
-        
-        // Memuat data baru dan otomatis melompat ke kartu WBP yang baru diedit
-        loadDataFromServer(targetWbpId);
-      }, function(err) {
-        isSubmitting = false;
-        hideLoading();
-        document.getElementById("btn-save-edit-modal").disabled = false;
-        alert("Gagal menyimpan perubahan: " + err);
-      });
+      closeModal("modal-edit");
+      renderHomeUI(APP_DATA.tabel_wbp);
+      showToast("Perubahan tersimpan. Menyinkronkan…");
+      scrollToCard(resolveId(targetWbpId));
     }
 
     function openMutasiModal() {
@@ -1337,8 +1663,6 @@
     }
 
     function executeMutasi() {
-      if (isSubmitting) return;
-
       var keKamar = document.getElementById("mutasi-kamar").value.toUpperCase().trim();
       var alasan = document.getElementById("mutasi-alasan").value.toUpperCase().trim();
 
@@ -1349,31 +1673,44 @@
       }
 
       var targetId = currentSelectedWBP.id;
-      var data = {
-        id: targetId,
-        nomorRegister: currentSelectedWBP.nomorRegistrasi,
+      var rec = findWbpById(targetId) || currentSelectedWBP;
+      var dariKamar = rec.blok || "";
+      var tglHariIni = todayDMY();
+
+      rec.blok = keKamar;
+      rec.tglPenempatan = tglHariIni;
+      idbPutWbp(rec);
+
+      var logItem = {
+        timestamp: nowWIB(),
+        id: String(targetId),
+        foto: rec.foto || "",
+        nomorRegistrasi: rec.nomorRegistrasi || "",
+        nama: rec.nama || "",
+        blok: keKamar,
+        tglMasukUpt: rec.tglMasukUpt || "",
+        tglPenempatan: tglHariIni,
+        pidana: rec.pidana || "",
+        tglEkspirasi: rec.tglEkspirasi || "",
+        putusan: rec.putusan || "",
+        dariKamar: dariKamar,
         keKamar: keKamar,
         keterangan: alasan
       };
+      APP_DATA.log_mutasi.push(logItem);
+      idbAddLog("log_mutasi", logItem);
 
-      isSubmitting = true;
-      document.getElementById("btn-submit-mutasi").disabled = true;
-      showLoading("Memproses Mutasi Kamar...");
-
-      callApi("mutasiWBP", [data]).then(function(res) {
-        isSubmitting = false;
-        hideLoading();
-        document.getElementById("btn-submit-mutasi").disabled = false;
-        closeModal('modal-mutasi');
-        alert("Mutasi berhasil disimpan!");
-        loadDataFromServer(targetId);
-        switchView('home');
-      }, function(err) {
-        isSubmitting = false;
-        hideLoading();
-        document.getElementById("btn-submit-mutasi").disabled = false;
-        alert("Gagal memproses mutasi: " + err);
+      enqueueOp({
+        kind: "mutasi",
+        action: "mutasiWBP",
+        targetId: targetId,
+        body: { nomorRegister: rec.nomorRegistrasi || "", keKamar: keKamar, keterangan: alasan }
       });
+
+      closeModal('modal-mutasi');
+      switchView('home');
+      showToast("Mutasi tersimpan. Menyinkronkan…");
+      scrollToCard(resolveId(targetId));
     }
 
     function openHapusModal() {
@@ -1392,36 +1729,44 @@
     }
 
     function executeHapus() {
-      if (isSubmitting) return;
-
       var selectVal = document.getElementById("hapus-status").value;
       var lainnyaText = document.getElementById("hapus-lainnya-text").value.toUpperCase();
       var statusKet = selectVal === "LAINNYA" ? lainnyaText : selectVal;
 
-      var data = {
-        id: currentSelectedWBP.id,
-        nomorRegister: currentSelectedWBP.nomorRegistrasi,
+      var targetId = currentSelectedWBP.id;
+      var rec = findWbpById(targetId) || currentSelectedWBP;
+
+      var logItem = {
+        timestamp: nowWIB(),
+        id: String(targetId),
+        foto: rec.foto || "",
+        nomorRegistrasi: rec.nomorRegistrasi || "",
+        nama: rec.nama || "",
+        blok: rec.blok || "",
+        tglMasukUpt: rec.tglMasukUpt || "",
+        tglPenempatan: rec.tglPenempatan || "",
+        pidana: rec.pidana || "",
+        tglEkspirasi: rec.tglEkspirasi || "",
+        putusan: rec.putusan || "",
+        kamarTerakhir: rec.blok || "",
         keterangan: statusKet
       };
+      APP_DATA.log_keluar.push(logItem);
+      idbAddLog("log_keluar", logItem);
 
-      isSubmitting = true;
-      document.getElementById("btn-submit-hapus").disabled = true;
-      showLoading("Memproses WBP Keluar...");
+      APP_DATA.tabel_wbp = APP_DATA.tabel_wbp.filter(function(w) { return w !== rec; });
+      idbDeleteWbp(rec.id);
 
-      callApi("releaseWBP", [data]).then(function(res) {
-        isSubmitting = false;
-        hideLoading();
-        document.getElementById("btn-submit-hapus").disabled = false;
-        closeModal('modal-hapus');
-        alert("Status WBP Keluar berhasil diproses!");
-        loadDataFromServer();
-        switchView('home');
-      }, function(err) {
-        isSubmitting = false;
-        hideLoading();
-        document.getElementById("btn-submit-hapus").disabled = false;
-        alert("Gagal memproses keluar: " + err);
+      enqueueOp({
+        kind: "release",
+        action: "releaseWBP",
+        targetId: targetId,
+        body: { nomorRegister: rec.nomorRegistrasi || "", keterangan: statusKet }
       });
+
+      closeModal('modal-hapus');
+      switchView('home');
+      showToast("WBP keluar diproses. Menyinkronkan…");
     }
 
     function switchRiwayatTab(tab) {
